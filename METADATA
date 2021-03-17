@@ -1,0 +1,19 @@
+name: "plotters"
+description: "A Rust drawing library focus on data plotting for both WASM and native applications"
+third_party {
+  url {
+    type: HOMEPAGE
+    value: "https://crates.io/crates/plotters"
+  }
+  url {
+    type: ARCHIVE
+    value: "https://static.crates.io/crates/plotters/plotters-0.2.15.crate"
+  }
+  version: "0.2.15"
+  license_type: NOTICE
+  last_upgrade_date {
+    year: 2020
+    month: 12
+    day: 21
+  }
+}
