@@ -27,8 +27,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_label_area_size(LabelAreaPosition::Left, 60)
         .set_label_area_size(LabelAreaPosition::Bottom, 60)
         .set_label_area_size(LabelAreaPosition::Right, 60)
-        .build_ranged(-4f64..4f64, 0f64..0.1)?
-        .set_secondary_coord((-40i32..40i32).into_centric(), 0u32..500u32);
+        .build_cartesian_2d(-4f64..4f64, 0f64..0.1)?
+        .set_secondary_coord(
+            (-4f64..4f64).step(0.1).use_round().into_segmented(),
+            0u32..500u32,
+        );
 
     chart
         .configure_mesh()
@@ -43,11 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actual = Histogram::vertical(chart.borrow_secondary())
         .style(GREEN.filled())
         .margin(3)
-        .data(
-            random_points
-                .iter()
-                .map(|x| ((x * 10.0).round() as i32, 1u32)),
-        );
+        .data(random_points.iter().map(|x| (*x, 1)));
 
     chart
         .draw_secondary_series(actual)?
@@ -73,4 +72,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     chart.configure_series_labels().draw()?;
 
     Ok(())
+}
+#[test]
+fn entry_point() {
+    main().unwrap()
 }
