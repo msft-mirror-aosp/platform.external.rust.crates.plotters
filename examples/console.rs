@@ -1,10 +1,8 @@
-use plotters::drawing::{
-    backend::{BackendStyle, DrawingErrorKind},
-    DrawingBackend,
-};
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, VPos};
-use plotters::style::RGBAColor;
+use plotters_backend::{
+    BackendColor, BackendStyle, BackendTextStyle, DrawingBackend, DrawingErrorKind,
+};
 use std::error::Error;
 
 #[derive(Copy, Clone)]
@@ -80,9 +78,9 @@ impl DrawingBackend for TextDrawingBackend {
     fn draw_pixel(
         &mut self,
         pos: (i32, i32),
-        color: &RGBAColor,
+        color: BackendColor,
     ) -> Result<(), DrawingErrorKind<std::io::Error>> {
-        if color.alpha() > 0.3 {
+        if color.alpha > 0.3 {
             self.0[(pos.1 * 100 + pos.0) as usize].update(PixelState::Pixel);
         }
         Ok(())
@@ -114,31 +112,31 @@ impl DrawingBackend for TextDrawingBackend {
             return Ok(());
         }
 
-        plotters::drawing::rasterizer::draw_line(self, from, to, style)
+        plotters_backend::rasterizer::draw_line(self, from, to, style)
     }
 
-    fn estimate_text_size<'a>(
+    fn estimate_text_size<S: BackendTextStyle>(
         &self,
         text: &str,
-        _font: &FontDesc<'a>,
+        _: &S,
     ) -> Result<(u32, u32), DrawingErrorKind<Self::ErrorType>> {
         Ok((text.len() as u32, 1))
     }
 
-    fn draw_text(
+    fn draw_text<S: BackendTextStyle>(
         &mut self,
         text: &str,
-        style: &TextStyle,
+        style: &S,
         pos: (i32, i32),
     ) -> Result<(), DrawingErrorKind<Self::ErrorType>> {
-        let (width, height) = self.estimate_text_size(text, &style.font)?;
+        let (width, height) = self.estimate_text_size(text, style)?;
         let (width, height) = (width as i32, height as i32);
-        let dx = match style.pos.h_pos {
+        let dx = match style.anchor().h_pos {
             HPos::Left => 0,
             HPos::Right => -width,
             HPos::Center => -width / 2,
         };
-        let dy = match style.pos.v_pos {
+        let dy = match style.anchor().v_pos {
             VPos::Top => 0,
             VPos::Center => -height / 2,
             VPos::Bottom => -height,
@@ -162,7 +160,7 @@ where
         .caption("Sine and Cosine", ("sans-serif", (10).percent_height()))
         .set_label_area_size(LabelAreaPosition::Left, (5i32).percent_width())
         .set_label_area_size(LabelAreaPosition::Bottom, (10i32).percent_height())
-        .build_ranged(-std::f64::consts::PI..std::f64::consts::PI, -1.2..1.2)?;
+        .build_cartesian_2d(-std::f64::consts::PI..std::f64::consts::PI, -1.2..1.2)?;
 
     chart
         .configure_mesh()
@@ -192,4 +190,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     b.fill(&WHITE)?;
     draw_chart(b)?;
     Ok(())
+}
+#[test]
+fn entry_point() {
+    main().unwrap()
 }
