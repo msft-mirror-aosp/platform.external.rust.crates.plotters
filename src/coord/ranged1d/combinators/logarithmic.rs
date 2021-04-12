@@ -1,8 +1,10 @@
-use super::{AsRangedCoord, Ranged, RangedCoordf64};
+use crate::coord::ranged1d::types::RangedCoordf64;
+use crate::coord::ranged1d::{AsRangedCoord, DefaultFormatting, KeyPointHint, Ranged};
 use std::marker::PhantomData;
 use std::ops::Range;
 
-/// The trait for the type that is able to be presented in the log scale
+/// The trait for the type that is able to be presented in the log scale.
+/// This trait is primarily used by [LogRange](struct.LogRange.html).
 pub trait LogScalable: Clone {
     /// Make the conversion from the type to the floating point number
     fn as_f64(&self) -> f64;
@@ -47,14 +49,22 @@ impl_log_scalable!(i, u64);
 impl_log_scalable!(f, f32);
 impl_log_scalable!(f, f64);
 
-/// The decorator type for a range of a log-scaled value
-pub struct LogRange<V: LogScalable>(pub Range<V>);
+pub trait IntoLogRange {
+    type ValueType: LogScalable;
+    fn log_scale(self) -> LogRange<Self::ValueType>;
+}
 
-impl<V: LogScalable + Clone> Clone for LogRange<V> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
+impl<T: LogScalable> IntoLogRange for Range<T> {
+    type ValueType = T;
+    fn log_scale(self) -> LogRange<T> {
+        LogRange(self)
     }
 }
+
+/// The logarithmic coodinate decorator.
+/// This decorator is used to make the axis rendered as logarithmically.
+#[derive(Clone)]
+pub struct LogRange<V: LogScalable>(pub Range<V>);
 
 impl<V: LogScalable> From<LogRange<V>> for LogCoord<V> {
     fn from(range: LogRange<V>) -> LogCoord<V> {
@@ -79,6 +89,7 @@ pub struct LogCoord<V: LogScalable> {
 }
 
 impl<V: LogScalable> Ranged for LogCoord<V> {
+    type FormatOption = DefaultFormatting;
     type ValueType = V;
 
     fn map(&self, value: &V, limit: (i32, i32)) -> i32 {
@@ -87,7 +98,8 @@ impl<V: LogScalable> Ranged for LogCoord<V> {
         self.linear.map(&value, limit)
     }
 
-    fn key_points(&self, max_points: usize) -> Vec<Self::ValueType> {
+    fn key_points<Hint: KeyPointHint>(&self, hint: Hint) -> Vec<Self::ValueType> {
+        let max_points = hint.max_num_points();
         let tier_1 = (self.logic.end.as_f64() / self.logic.start.as_f64())
             .log10()
             .abs()
