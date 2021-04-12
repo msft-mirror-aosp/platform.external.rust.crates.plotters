@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .margin(10)
         .set_label_area_size(LabelAreaPosition::Left, 40)
         .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_ranged(-10f64..10f64, -10f64..10f64)?;
+        .build_cartesian_2d(-10f64..10f64, -10f64..10f64)?;
 
     chart.configure_mesh().draw()?;
 
@@ -87,4 +87,8 @@ fn down_sample(data: &[(f64, f64)]) -> Vec<(f64, f64, f64, f64)> {
         })
         .collect();
     down_sampled
+}
+#[test]
+fn entry_point() {
+    main().unwrap()
 }

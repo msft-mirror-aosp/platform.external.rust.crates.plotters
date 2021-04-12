@@ -1,74 +1,28 @@
 use std::borrow::Borrow;
-use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::ops::Range;
-use std::sync::Arc;
 
-use super::dual_coord::DualCoordChartContext;
-use super::mesh::MeshStyle;
-use super::series::SeriesLabelStyle;
+use super::axes3d::Axes3dStyle;
+use super::{DualCoordChartContext, MeshStyle, SeriesAnno, SeriesLabelStyle};
 
-use crate::coord::{
-    AsRangedCoord, CoordTranslate, MeshLine, Ranged, RangedCoord, ReverseCoordTranslate, Shift,
-};
-use crate::drawing::backend::{BackendCoord, DrawingBackend};
+use crate::coord::cartesian::{Cartesian2d, Cartesian3d, MeshLine};
+use crate::coord::ranged1d::{AsRangedCoord, KeyPointHint, Ranged, ValueFormatter};
+use crate::coord::ranged3d::{ProjectionMatrix, ProjectionMatrixBuilder};
+use crate::coord::{CoordTranslate, ReverseCoordTranslate, Shift};
+
 use crate::drawing::{DrawingArea, DrawingAreaErrorKind};
-use crate::element::{Drawable, DynElement, IntoDynElement, PathElement, PointCollection};
+use crate::element::{Drawable, EmptyElement, PathElement, PointCollection, Polygon, Text};
 use crate::style::text_anchor::{HPos, Pos, VPos};
-use crate::style::{AsRelative, FontTransform, ShapeStyle, SizeDesc, TextStyle};
+use crate::style::{ShapeStyle, TextStyle};
 
-/// The annotations (such as the label of the series, the legend element, etc)
-/// When a series is drawn onto a drawing area, an series annotation object
-/// is created and a mutable reference is returned.
-#[allow(clippy::type_complexity)]
-pub struct SeriesAnno<'a, DB: DrawingBackend> {
-    label: Option<String>,
-    draw_func: Option<Box<dyn Fn(BackendCoord) -> DynElement<'a, DB, BackendCoord> + 'a>>,
-    phantom_data: PhantomData<DB>,
-}
-
-impl<'a, DB: DrawingBackend> SeriesAnno<'a, DB> {
-    pub(crate) fn get_label(&self) -> &str {
-        self.label.as_ref().map(|x| x.as_str()).unwrap_or("")
-    }
-
-    pub(crate) fn get_draw_func(
-        &self,
-    ) -> Option<&dyn Fn(BackendCoord) -> DynElement<'a, DB, BackendCoord>> {
-        self.draw_func.as_ref().map(|x| x.borrow())
-    }
-
-    fn new() -> Self {
-        Self {
-            label: None,
-            draw_func: None,
-            phantom_data: PhantomData,
-        }
-    }
-
-    /// Set the series label
-    /// - `label`: The string would be use as label for current series
-    pub fn label<L: Into<String>>(&mut self, label: L) -> &mut Self {
-        self.label = Some(label.into());
-        self
-    }
-
-    /// Set the legend element creator function
-    /// - `func`: The function use to create the element
-    /// *Note*: The creation function uses a shifted pixel-based coordinate system. And place the
-    /// point (0,0) to the mid-right point of the shape
-    pub fn legend<E: IntoDynElement<'a, DB, BackendCoord>, T: Fn(BackendCoord) -> E + 'a>(
-        &mut self,
-        func: T,
-    ) -> &mut Self {
-        self.draw_func = Some(Box::new(move |p| func(p).into_dyn()));
-        self
-    }
-}
+use plotters_backend::{BackendCoord, DrawingBackend, FontTransform};
 
 /// The context of the chart. This is the core object of Plotters.
 /// Any plot/chart is abstracted as this type, and any data series can be placed to the chart
 /// context.
+///
+/// - To draw a series on a chart context, use [ChartContext::draw_series](struct.ChartContext.html#method.draw_series)
+/// - To draw a single element to the chart, you may want to use [ChartContext::plotting_area](struct.ChartContext.html#method.plotting_area)
+///
 pub struct ChartContext<'a, DB: DrawingBackend, CT: CoordTranslate> {
     pub(super) x_label_area: [Option<DrawingArea<DB, Shift>>; 2],
     pub(super) y_label_area: [Option<DrawingArea<DB, Shift>>; 2],
@@ -77,111 +31,16 @@ pub struct ChartContext<'a, DB: DrawingBackend, CT: CoordTranslate> {
     pub(super) drawing_area_pos: (i32, i32),
 }
 
-/// A chart context state - This is the data that is needed to reconstruct the chart context
-/// without actually drawing the chart. This is useful when we want to do realtime rendering and
-/// want to incrementally update the chart.
-///
-/// For each frame, instead of updating the entire backend, we are able to keep the keep the figure
-/// component like axis, labels untouched and make updates only in the plotting drawing area.
-pub struct ChartState<CT: CoordTranslate> {
-    drawing_area_pos: (i32, i32),
-    drawing_area_size: (u32, u32),
-    coord: CT,
-}
-
-impl<'a, CT: CoordTranslate + Clone> Clone for ChartState<CT> {
-    fn clone(&self) -> Self {
-        Self {
-            drawing_area_size: self.drawing_area_size,
-            drawing_area_pos: self.drawing_area_pos,
-            coord: self.coord.clone(),
-        }
-    }
-}
-
-impl<'a, DB: DrawingBackend, CT: CoordTranslate> From<ChartContext<'a, DB, CT>> for ChartState<CT> {
-    fn from(chart: ChartContext<'a, DB, CT>) -> ChartState<CT> {
-        ChartState {
-            drawing_area_pos: chart.drawing_area_pos,
-            drawing_area_size: chart.drawing_area.dim_in_pixel(),
-            coord: chart.drawing_area.into_coord_spec(),
-        }
-    }
-}
-
-impl<'a, DB: DrawingBackend, CT: CoordTranslate> ChartContext<'a, DB, CT> {
-    /// Convert a chart context into a chart state, by doing so, the chart context is consumed and
-    /// a saved chart state is created for later use.
-    pub fn into_chart_state(self) -> ChartState<CT> {
-        self.into()
-    }
-
-    /// Convert the chart context into a sharable chart state.
-    /// Normally a chart state can not be clone, since the coordinate spec may not be able to be
-    /// cloned. In this case, we can use an `Arc` get the coordinate wrapped thus the state can be
-    /// cloned and shared by multiple chart context
-    pub fn into_shared_chart_state(self) -> ChartState<Arc<CT>> {
-        ChartState {
-            drawing_area_pos: self.drawing_area_pos,
-            drawing_area_size: self.drawing_area.dim_in_pixel(),
-            coord: Arc::new(self.drawing_area.into_coord_spec()),
-        }
-    }
-}
-
-impl<'a, 'b, DB, CT> From<&ChartContext<'a, DB, CT>> for ChartState<CT>
+impl<'a, DB, XT, YT, X, Y> ChartContext<'a, DB, Cartesian2d<X, Y>>
 where
     DB: DrawingBackend,
-    CT: CoordTranslate + Clone,
+    X: Ranged<ValueType = XT> + ValueFormatter<XT>,
+    Y: Ranged<ValueType = YT> + ValueFormatter<YT>,
 {
-    fn from(chart: &ChartContext<'a, DB, CT>) -> ChartState<CT> {
-        ChartState {
-            drawing_area_pos: chart.drawing_area_pos,
-            drawing_area_size: chart.drawing_area.dim_in_pixel(),
-            coord: chart.drawing_area.as_coord_spec().clone(),
-        }
-    }
-}
-
-impl<'a, DB: DrawingBackend, CT: CoordTranslate + Clone> ChartContext<'a, DB, CT> {
-    /// Make the chart context, do not consume the chart context and clone the coordinate spec
-    pub fn to_chart_state(&self) -> ChartState<CT> {
-        self.into()
-    }
-}
-
-impl<CT: CoordTranslate> ChartState<CT> {
-    /// Restore the chart context on the given drawing area
-    ///
-    /// - `area`: The given drawing area where we want to restore the chart context
-    /// - **returns** The newly created chart context
-    pub fn restore<'a, DB: DrawingBackend>(
-        self,
-        area: &DrawingArea<DB, Shift>,
-    ) -> ChartContext<'a, DB, CT> {
-        let area = area
-            .clone()
-            .shrink(self.drawing_area_pos, self.drawing_area_size);
-        ChartContext {
-            x_label_area: [None, None],
-            y_label_area: [None, None],
-            drawing_area: area.apply_coord_spec(self.coord),
-            series_anno: vec![],
-            drawing_area_pos: self.drawing_area_pos,
-        }
-    }
-}
-
-impl<
-        'a,
-        DB: DrawingBackend,
-        XT: Debug,
-        YT: Debug,
-        X: Ranged<ValueType = XT>,
-        Y: Ranged<ValueType = YT>,
-    > ChartContext<'a, DB, RangedCoord<X, Y>>
-{
-    fn is_overlapping_drawing_area(&self, area: Option<&DrawingArea<DB, Shift>>) -> bool {
+    pub(crate) fn is_overlapping_drawing_area(
+        &self,
+        area: Option<&DrawingArea<DB, Shift>>,
+    ) -> bool {
         if let Some(area) = area {
             let (x0, y0) = area.get_base_pixel();
             let (w, h) = area.dim_in_pixel();
@@ -200,65 +59,9 @@ impl<
     }
 
     /// Initialize a mesh configuration object and mesh drawing can be finalized by calling
-    /// the function `MeshStyle::draw`
-    pub fn configure_mesh<'b>(&'b mut self) -> MeshStyle<'a, 'b, X, Y, DB> {
-        let base_tick_size = (5u32).percent().max(5).in_pixels(&self.drawing_area);
-
-        let mut x_tick_size = [base_tick_size, base_tick_size];
-        let mut y_tick_size = [base_tick_size, base_tick_size];
-
-        for idx in 0..2 {
-            if self.is_overlapping_drawing_area(self.x_label_area[idx].as_ref()) {
-                x_tick_size[idx] = -x_tick_size[idx];
-            }
-            if self.is_overlapping_drawing_area(self.y_label_area[idx].as_ref()) {
-                y_tick_size[idx] = -y_tick_size[idx];
-            }
-        }
-
-        MeshStyle {
-            parent_size: self.drawing_area.dim_in_pixel(),
-            axis_style: None,
-            x_label_offset: 0,
-            y_label_offset: 0,
-            draw_x_mesh: true,
-            draw_y_mesh: true,
-            draw_x_axis: true,
-            draw_y_axis: true,
-            n_x_labels: 10,
-            n_y_labels: 10,
-            line_style_1: None,
-            line_style_2: None,
-            x_label_style: None,
-            y_label_style: None,
-            format_x: &|x| format!("{:?}", x),
-            format_y: &|y| format!("{:?}", y),
-            target: Some(self),
-            _phantom_data: PhantomData,
-            x_desc: None,
-            y_desc: None,
-            axis_desc_style: None,
-            x_tick_size,
-            y_tick_size,
-        }
-    }
-}
-
-impl<'a, DB: DrawingBackend + 'a, CT: CoordTranslate> ChartContext<'a, DB, CT> {
-    /// Configure the styles for drawing series labels in the chart
-    pub fn configure_series_labels<'b>(&'b mut self) -> SeriesLabelStyle<'a, 'b, DB, CT> {
-        SeriesLabelStyle::new(self)
-    }
-
-    /// Get a reference of underlying plotting area
-    pub fn plotting_area(&self) -> &DrawingArea<DB, CT> {
-        &self.drawing_area
-    }
-}
-
-impl<'a, DB: DrawingBackend, CT: CoordTranslate> ChartContext<'a, DB, CT> {
-    pub fn as_coord_spec(&self) -> &CT {
-        self.drawing_area.as_coord_spec()
+    /// the function `MeshStyle::draw`.
+    pub fn configure_mesh(&mut self) -> MeshStyle<'a, '_, X, Y, DB> {
+        MeshStyle::new(self)
     }
 }
 
@@ -270,13 +73,36 @@ impl<'a, DB: DrawingBackend, CT: ReverseCoordTranslate> ChartContext<'a, DB, CT>
     }
 }
 
-impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, Arc<RangedCoord<X, Y>>> {
+impl<'a, DB: DrawingBackend, CT: CoordTranslate> ChartContext<'a, DB, CT> {
+    /// Configure the styles for drawing series labels in the chart
+    pub fn configure_series_labels<'b>(&'b mut self) -> SeriesLabelStyle<'a, 'b, DB, CT>
+    where
+        DB: 'a,
+    {
+        SeriesLabelStyle::new(self)
+    }
+
+    /// Get a reference of underlying plotting area
+    pub fn plotting_area(&self) -> &DrawingArea<DB, CT> {
+        &self.drawing_area
+    }
+
+    /// Cast the reference to a chart context to a reference to underlying coordinate specification.
+    pub fn as_coord_spec(&self) -> &CT {
+        self.drawing_area.as_coord_spec()
+    }
+
+    // TODO: All draw_series_impl is overly strict about lifetime, because we don't have stable HKT,
+    //       what we can ensure is for all lifetime 'b the element reference &'b E is a iterator
+    //       of points reference with the same lifetime.
+    //       However, this doesn't work if the coordinate doesn't live longer than the backend,
+    //       this is unnecessarily strict
     pub(super) fn draw_series_impl<E, R, S>(
         &mut self,
         series: S,
     ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>>
     where
-        for<'b> &'b E: PointCollection<'b, (X::ValueType, Y::ValueType)>,
+        for<'b> &'b E: PointCollection<'b, CT::From>,
         E: Drawable<DB>,
         R: Borrow<E>,
         S: IntoIterator<Item = R>,
@@ -299,7 +125,7 @@ impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, Arc<Rang
         series: S,
     ) -> Result<&mut SeriesAnno<'a, DB>, DrawingAreaErrorKind<DB::ErrorType>>
     where
-        for<'b> &'b E: PointCollection<'b, (X::ValueType, Y::ValueType)>,
+        for<'b> &'b E: PointCollection<'b, CT::From>,
         E: Drawable<DB>,
         R: Borrow<E>,
         S: IntoIterator<Item = R>,
@@ -309,7 +135,7 @@ impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, Arc<Rang
     }
 }
 
-impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, RangedCoord<X, Y>> {
+impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, Cartesian2d<X, Y>> {
     /// Get the range of X axis
     pub fn x_range(&self) -> Range<X::ValueType> {
         self.drawing_area.get_x_range()
@@ -326,49 +152,12 @@ impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, RangedCo
         self.drawing_area.map_coordinate(coord)
     }
 
-    pub(super) fn draw_series_impl<E, R, S>(
-        &mut self,
-        series: S,
-    ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>>
-    where
-        for<'b> &'b E: PointCollection<'b, (X::ValueType, Y::ValueType)>,
-        E: Drawable<DB>,
-        R: Borrow<E>,
-        S: IntoIterator<Item = R>,
-    {
-        for element in series {
-            self.drawing_area.draw(element.borrow())?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn alloc_series_anno(&mut self) -> &mut SeriesAnno<'a, DB> {
-        let idx = self.series_anno.len();
-        self.series_anno.push(SeriesAnno::new());
-        &mut self.series_anno[idx]
-    }
-
-    /// Draw a data series. A data series in Plotters is abstracted as an iterator of elements
-    pub fn draw_series<E, R, S>(
-        &mut self,
-        series: S,
-    ) -> Result<&mut SeriesAnno<'a, DB>, DrawingAreaErrorKind<DB::ErrorType>>
-    where
-        for<'b> &'b E: PointCollection<'b, (X::ValueType, Y::ValueType)>,
-        E: Drawable<DB>,
-        R: Borrow<E>,
-        S: IntoIterator<Item = R>,
-    {
-        self.draw_series_impl(series)?;
-        Ok(self.alloc_series_anno())
-    }
-
     /// The actual function that draws the mesh lines.
     /// It also returns the label that suppose to be there.
     #[allow(clippy::type_complexity)]
-    fn draw_mesh_lines<FmtLabel>(
+    fn draw_mesh_lines<FmtLabel, YH: KeyPointHint, XH: KeyPointHint>(
         &mut self,
-        (r, c): (usize, usize),
+        (r, c): (YH, XH),
         (x_mesh, y_mesh): (bool, bool),
         mesh_line_style: &ShapeStyle,
         mut fmt_label: FmtLabel,
@@ -665,9 +454,9 @@ impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, RangedCo
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn draw_mesh<FmtLabel>(
+    pub(super) fn draw_mesh<FmtLabel, YH: KeyPointHint, XH: KeyPointHint>(
         &mut self,
-        (r, c): (usize, usize),
+        (r, c): (YH, XH),
         mesh_line_style: &ShapeStyle,
         x_label_style: &TextStyle,
         y_label_style: &TextStyle,
@@ -718,7 +507,8 @@ impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, RangedCo
         Ok(())
     }
 
-    /// Convert this chart context into a dual axis chart context
+    /// Convert this chart context into a dual axis chart context and attach a second coordinate spec
+    /// on the chart context. For more detailed information, see documentation for [struct DualCoordChartContext](struct.DualCoordChartContext.html)
     ///
     /// - `x_coord`: The coordinate spec for the X axis
     /// - `y_coord`: The coordinate spec for the Y axis
@@ -731,13 +521,360 @@ impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, RangedCo
     ) -> DualCoordChartContext<
         'a,
         DB,
-        RangedCoord<X, Y>,
-        RangedCoord<SX::CoordDescType, SY::CoordDescType>,
+        Cartesian2d<X, Y>,
+        Cartesian2d<SX::CoordDescType, SY::CoordDescType>,
     > {
         let mut pixel_range = self.drawing_area.get_pixel_range();
         pixel_range.1 = pixel_range.1.end..pixel_range.1.start;
 
-        DualCoordChartContext::new(self, RangedCoord::new(x_coord, y_coord, pixel_range))
+        DualCoordChartContext::new(self, Cartesian2d::new(x_coord, y_coord, pixel_range))
+    }
+}
+
+pub(super) struct KeyPoints3d<X: Ranged, Y: Ranged, Z: Ranged> {
+    pub(super) x_points: Vec<X::ValueType>,
+    pub(super) y_points: Vec<Y::ValueType>,
+    pub(super) z_points: Vec<Z::ValueType>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum Coord3D<X, Y, Z> {
+    X(X),
+    Y(Y),
+    Z(Z),
+}
+
+impl<X, Y, Z> Coord3D<X, Y, Z> {
+    fn get_x(&self) -> &X {
+        match self {
+            Coord3D::X(ret) => ret,
+            _ => panic!("Invalid call!"),
+        }
+    }
+    fn get_y(&self) -> &Y {
+        match self {
+            Coord3D::Y(ret) => ret,
+            _ => panic!("Invalid call!"),
+        }
+    }
+    fn get_z(&self) -> &Z {
+        match self {
+            Coord3D::Z(ret) => ret,
+            _ => panic!("Invalid call!"),
+        }
+    }
+
+    fn build_coord([x, y, z]: [&Self; 3]) -> (X, Y, Z)
+    where
+        X: Clone,
+        Y: Clone,
+        Z: Clone,
+    {
+        (x.get_x().clone(), y.get_y().clone(), z.get_z().clone())
+    }
+}
+impl<'a, DB, X, Y, Z, XT, YT, ZT> ChartContext<'a, DB, Cartesian3d<X, Y, Z>>
+where
+    DB: DrawingBackend,
+    X: Ranged<ValueType = XT> + ValueFormatter<XT>,
+    Y: Ranged<ValueType = YT> + ValueFormatter<YT>,
+    Z: Ranged<ValueType = ZT> + ValueFormatter<ZT>,
+{
+    pub fn configure_axes(&mut self) -> Axes3dStyle<'a, '_, X, Y, Z, DB> {
+        Axes3dStyle::new(self)
+    }
+}
+impl<'a, DB, X: Ranged, Y: Ranged, Z: Ranged> ChartContext<'a, DB, Cartesian3d<X, Y, Z>>
+where
+    DB: DrawingBackend,
+{
+    /// Override the 3D projection matrix. This function allows to override the default projection
+    /// matrix.
+    /// - `pf`: A function that takes the default projection matrix configuration and returns the
+    /// projection matrix. This function will allow you to adjust the pitch, yaw angle and the
+    /// centeral point of the projection, etc. You can also build a projection matrix which is not
+    /// relies on the default configuration as well.
+    pub fn with_projection<P: FnOnce(ProjectionMatrixBuilder) -> ProjectionMatrix>(
+        &mut self,
+        pf: P,
+    ) -> &mut Self {
+        let (actual_x, actual_y) = self.drawing_area.get_pixel_range();
+        self.drawing_area
+            .as_coord_spec_mut()
+            .set_projection(actual_x, actual_y, pf);
+        self
+    }
+}
+
+impl<'a, DB, X: Ranged, Y: Ranged, Z: Ranged> ChartContext<'a, DB, Cartesian3d<X, Y, Z>>
+where
+    DB: DrawingBackend,
+    X::ValueType: Clone,
+    Y::ValueType: Clone,
+    Z::ValueType: Clone,
+{
+    pub(super) fn get_key_points<XH: KeyPointHint, YH: KeyPointHint, ZH: KeyPointHint>(
+        &self,
+        x_hint: XH,
+        y_hint: YH,
+        z_hint: ZH,
+    ) -> KeyPoints3d<X, Y, Z> {
+        let coord = self.plotting_area().as_coord_spec();
+        let x_points = coord.logic_x.key_points(x_hint);
+        let y_points = coord.logic_y.key_points(y_hint);
+        let z_points = coord.logic_z.key_points(z_hint);
+        KeyPoints3d {
+            x_points,
+            y_points,
+            z_points,
+        }
+    }
+    pub(super) fn draw_axis_ticks(
+        &mut self,
+        axis: [[Coord3D<X::ValueType, Y::ValueType, Z::ValueType>; 3]; 2],
+        labels: &[(
+            [Coord3D<X::ValueType, Y::ValueType, Z::ValueType>; 3],
+            String,
+        )],
+        tick_size: i32,
+        style: ShapeStyle,
+        font: TextStyle,
+    ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+        let coord = self.plotting_area().as_coord_spec();
+        let begin = coord.translate(&Coord3D::build_coord([
+            &axis[0][0],
+            &axis[0][1],
+            &axis[0][2],
+        ]));
+        let end = coord.translate(&Coord3D::build_coord([
+            &axis[1][0],
+            &axis[1][1],
+            &axis[1][2],
+        ]));
+        let axis_dir = (end.0 - begin.0, end.1 - begin.1);
+        let (x_range, y_range) = self.plotting_area().get_pixel_range();
+        let x_mid = (x_range.start + x_range.end) / 2;
+        let y_mid = (y_range.start + y_range.end) / 2;
+
+        let x_dir = if begin.0 < x_mid {
+            (-tick_size, 0)
+        } else {
+            (tick_size, 0)
+        };
+
+        let y_dir = if begin.1 < y_mid {
+            (0, -tick_size)
+        } else {
+            (0, tick_size)
+        };
+
+        let x_score = (x_dir.0 * axis_dir.0 + x_dir.1 * axis_dir.1).abs();
+        let y_score = (y_dir.0 * axis_dir.0 + y_dir.1 * axis_dir.1).abs();
+
+        let dir = if x_score < y_score { x_dir } else { y_dir };
+
+        for (pos, text) in labels {
+            let logic_pos = Coord3D::build_coord([&pos[0], &pos[1], &pos[2]]);
+            let mut font = font.clone();
+            if dir.0 < 0 {
+                font.pos = Pos::new(HPos::Right, VPos::Center);
+            } else if dir.0 > 0 {
+                font.pos = Pos::new(HPos::Left, VPos::Center);
+            };
+            if dir.1 < 0 {
+                font.pos = Pos::new(HPos::Center, VPos::Bottom);
+            } else if dir.1 > 0 {
+                font.pos = Pos::new(HPos::Center, VPos::Top);
+            };
+            let element = EmptyElement::at(logic_pos)
+                + PathElement::new(vec![(0, 0), dir], style.clone())
+                + Text::new(text.to_string(), (dir.0 * 2, dir.1 * 2), font.clone());
+            self.plotting_area().draw(&element)?;
+        }
+        Ok(())
+    }
+    pub(super) fn draw_axis(
+        &mut self,
+        idx: usize,
+        panels: &[[[Coord3D<X::ValueType, Y::ValueType, Z::ValueType>; 3]; 2]; 3],
+        style: ShapeStyle,
+    ) -> Result<
+        [[Coord3D<X::ValueType, Y::ValueType, Z::ValueType>; 3]; 2],
+        DrawingAreaErrorKind<DB::ErrorType>,
+    > {
+        let coord = self.plotting_area().as_coord_spec();
+        let x_range = coord.logic_x.range();
+        let y_range = coord.logic_y.range();
+        let z_range = coord.logic_z.range();
+
+        let ranges: [[Coord3D<X::ValueType, Y::ValueType, Z::ValueType>; 2]; 3] = [
+            [Coord3D::X(x_range.start), Coord3D::X(x_range.end)],
+            [Coord3D::Y(y_range.start), Coord3D::Y(y_range.end)],
+            [Coord3D::Z(z_range.start), Coord3D::Z(z_range.end)],
+        ];
+
+        let (start, end) = {
+            let mut start = [&ranges[0][0], &ranges[1][0], &ranges[2][0]];
+            let mut end = [&ranges[0][1], &ranges[1][1], &ranges[2][1]];
+
+            let mut plan = vec![];
+
+            for i in 0..3 {
+                if i == idx {
+                    continue;
+                }
+                start[i] = &panels[i][0][i];
+                end[i] = &panels[i][0][i];
+                for j in 0..3 {
+                    if i != idx && i != j && j != idx {
+                        for k in 0..2 {
+                            start[j] = &panels[i][k][j];
+                            end[j] = &panels[i][k][j];
+                            plan.push((start, end));
+                        }
+                    }
+                }
+            }
+            plan.into_iter()
+                .min_by_key(|&(s, e)| {
+                    let d = coord.projected_depth(s[0].get_x(), s[1].get_y(), s[2].get_z());
+                    let d = d + coord.projected_depth(e[0].get_x(), e[1].get_y(), e[2].get_z());
+                    let (_, y1) = coord.translate(&Coord3D::build_coord(s));
+                    let (_, y2) = coord.translate(&Coord3D::build_coord(e));
+                    let y = y1 + y2;
+                    (d, y)
+                })
+                .unwrap()
+        };
+
+        self.plotting_area().draw(&PathElement::new(
+            vec![Coord3D::build_coord(start), Coord3D::build_coord(end)],
+            style.clone(),
+        ))?;
+
+        Ok([
+            [start[0].clone(), start[1].clone(), start[2].clone()],
+            [end[0].clone(), end[1].clone(), end[2].clone()],
+        ])
+    }
+    pub(super) fn draw_axis_panels(
+        &mut self,
+        bold_points: &KeyPoints3d<X, Y, Z>,
+        light_points: &KeyPoints3d<X, Y, Z>,
+        panel_style: ShapeStyle,
+        bold_grid_style: ShapeStyle,
+        light_grid_style: ShapeStyle,
+    ) -> Result<
+        [[[Coord3D<X::ValueType, Y::ValueType, Z::ValueType>; 3]; 2]; 3],
+        DrawingAreaErrorKind<DB::ErrorType>,
+    > {
+        let mut r_iter = (0..3).map(|idx| {
+            self.draw_axis_panel(
+                idx,
+                bold_points,
+                light_points,
+                panel_style.clone(),
+                bold_grid_style.clone(),
+                light_grid_style.clone(),
+            )
+        });
+        Ok([
+            r_iter.next().unwrap()?,
+            r_iter.next().unwrap()?,
+            r_iter.next().unwrap()?,
+        ])
+    }
+    fn draw_axis_panel(
+        &mut self,
+        idx: usize,
+        bold_points: &KeyPoints3d<X, Y, Z>,
+        light_points: &KeyPoints3d<X, Y, Z>,
+        panel_style: ShapeStyle,
+        bold_grid_style: ShapeStyle,
+        light_grid_style: ShapeStyle,
+    ) -> Result<
+        [[Coord3D<X::ValueType, Y::ValueType, Z::ValueType>; 3]; 2],
+        DrawingAreaErrorKind<DB::ErrorType>,
+    > {
+        let coord = self.plotting_area().as_coord_spec();
+        let x_range = coord.logic_x.range();
+        let y_range = coord.logic_y.range();
+        let z_range = coord.logic_z.range();
+
+        let ranges: [[Coord3D<X::ValueType, Y::ValueType, Z::ValueType>; 2]; 3] = [
+            [Coord3D::X(x_range.start), Coord3D::X(x_range.end)],
+            [Coord3D::Y(y_range.start), Coord3D::Y(y_range.end)],
+            [Coord3D::Z(z_range.start), Coord3D::Z(z_range.end)],
+        ];
+
+        let (mut panel, start, end) = {
+            let a = [&ranges[0][0], &ranges[1][0], &ranges[2][0]];
+            let mut b = [&ranges[0][1], &ranges[1][1], &ranges[2][1]];
+            let mut c = a;
+            let d = b;
+
+            b[idx] = &ranges[idx][0];
+            c[idx] = &ranges[idx][1];
+
+            let (a, b) = if coord.projected_depth(a[0].get_x(), a[1].get_y(), a[2].get_z())
+                >= coord.projected_depth(c[0].get_x(), c[1].get_y(), c[2].get_z())
+            {
+                (a, b)
+            } else {
+                (c, d)
+            };
+
+            let mut m = a.clone();
+            m[(idx + 1) % 3] = b[(idx + 1) % 3];
+            let mut n = a.clone();
+            n[(idx + 2) % 3] = b[(idx + 2) % 3];
+
+            (
+                vec![
+                    Coord3D::build_coord(a),
+                    Coord3D::build_coord(m),
+                    Coord3D::build_coord(b),
+                    Coord3D::build_coord(n),
+                ],
+                a,
+                b,
+            )
+        };
+        self.plotting_area()
+            .draw(&Polygon::new(panel.clone(), panel_style.clone()))?;
+        panel.push(panel[0].clone());
+        self.plotting_area()
+            .draw(&PathElement::new(panel, bold_grid_style.clone()))?;
+
+        for (kps, style) in vec![
+            (light_points, light_grid_style),
+            (bold_points, bold_grid_style),
+        ]
+        .into_iter()
+        {
+            for idx in (0..3).filter(|&i| i != idx) {
+                let kps: Vec<_> = match idx {
+                    0 => kps.x_points.iter().map(|x| Coord3D::X(x.clone())).collect(),
+                    1 => kps.y_points.iter().map(|y| Coord3D::Y(y.clone())).collect(),
+                    _ => kps.z_points.iter().map(|z| Coord3D::Z(z.clone())).collect(),
+                };
+                for kp in kps.iter() {
+                    let mut kp_start = start;
+                    let mut kp_end = end;
+                    kp_start[idx] = kp;
+                    kp_end[idx] = kp;
+                    self.plotting_area().draw(&PathElement::new(
+                        vec![Coord3D::build_coord(kp_start), Coord3D::build_coord(kp_end)],
+                        style.clone(),
+                    ))?;
+                }
+            }
+        }
+
+        Ok([
+            [start[0].clone(), start[1].clone(), start[2].clone()],
+            [end[0].clone(), end[1].clone(), end[2].clone()],
+        ])
     }
 }
 
@@ -757,7 +894,7 @@ mod test {
             .y_label_area_size(20)
             .set_label_area_size(LabelAreaPosition::Top, 20)
             .set_label_area_size(LabelAreaPosition::Right, 20)
-            .build_ranged(0..10, 0..10)
+            .build_cartesian_2d(0..10, 0..10)
             .expect("Create chart")
             .set_secondary_coord(0.0..1.0, 0.0..1.0);
 
@@ -787,6 +924,35 @@ mod test {
             .configure_series_labels()
             .position(SeriesLabelPosition::UpperMiddle)
             .draw()
+            .expect("Drawing error");
+    }
+
+    #[test]
+    fn test_chart_context_3d() {
+        let drawing_area = create_mocked_drawing_area(200, 200, |_| {});
+
+        drawing_area.fill(&WHITE).expect("Fill");
+
+        let mut chart = ChartBuilder::on(&drawing_area)
+            .caption("Test Title", ("serif", 10))
+            .x_label_area_size(20)
+            .y_label_area_size(20)
+            .set_label_area_size(LabelAreaPosition::Top, 20)
+            .set_label_area_size(LabelAreaPosition::Right, 20)
+            .build_cartesian_3d(0..10, 0..10, 0..10)
+            .expect("Create chart");
+
+        chart.with_projection(|mut pb| {
+            pb.yaw = 0.5;
+            pb.pitch = 0.5;
+            pb.scale = 0.5;
+            pb.into_matrix()
+        });
+
+        chart.configure_axes().draw().expect("Drawing axes");
+
+        chart
+            .draw_series(std::iter::once(Circle::new((5, 5, 5), 5, &RED)))
             .expect("Drawing error");
     }
 }

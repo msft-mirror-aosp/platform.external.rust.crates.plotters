@@ -1,17 +1,35 @@
+use std::convert::TryFrom;
 use std::ops::Range;
 
-use super::{AsRangedCoord, DiscreteRanged, Ranged, ReversibleRanged};
+use crate::coord::ranged1d::{
+    AsRangedCoord, DefaultFormatting, DiscreteRanged, KeyPointHint, NoDefaultFormatting, Ranged,
+    ReversibleRanged, ValueFormatter,
+};
 
 macro_rules! impl_discrete_trait {
     ($name:ident) => {
         impl DiscreteRanged for $name {
-            type RangeParameter = ();
-            fn get_range_parameter(&self) -> () {}
-            fn next_value(this: &Self::ValueType, _: &()) -> Self::ValueType {
-                return *this + 1;
+            fn size(&self) -> usize {
+                if &self.1 < &self.0 {
+                    return 0;
+                }
+                let values = self.1 - self.0;
+                (values + 1) as usize
             }
-            fn previous_value(this: &Self::ValueType, _: &()) -> Self::ValueType {
-                return *this - 1;
+
+            fn index_of(&self, value: &Self::ValueType) -> Option<usize> {
+                if value < &self.0 {
+                    return None;
+                }
+                let ret = value - self.0;
+                Some(ret as usize)
+            }
+
+            fn from_index(&self, index: usize) -> Option<Self::ValueType> {
+                if let Ok(index) = Self::ValueType::try_from(index) {
+                    return Some(self.0 + index);
+                }
+                None
             }
         }
     };
@@ -25,9 +43,23 @@ macro_rules! impl_ranged_type_trait {
         }
     };
 }
+macro_rules! impl_reverse_mapping_trait {
+    ($type:ty, $name: ident) => {
+        impl ReversibleRanged for $name {
+            fn unmap(&self, p: i32, (min, max): (i32, i32)) -> Option<$type> {
+                if p < min.min(max) || p > max.max(min) || min == max {
+                    return None;
+                }
 
+                let logical_offset = f64::from(p - min) / f64::from(max - min);
+
+                return Some(((self.1 - self.0) as f64 * logical_offset + self.0 as f64) as $type);
+            }
+        }
+    };
+}
 macro_rules! make_numeric_coord {
-    ($type:ty, $name:ident, $key_points:ident, $doc: expr) => {
+    ($type:ty, $name:ident, $key_points:ident, $doc: expr, $fmt: ident) => {
         #[doc = $doc]
         #[derive(Clone)]
         pub struct $name($type, $type);
@@ -37,9 +69,18 @@ macro_rules! make_numeric_coord {
             }
         }
         impl Ranged for $name {
+            type FormatOption = $fmt;
             type ValueType = $type;
+            #[allow(clippy::float_cmp)]
             fn map(&self, v: &$type, limit: (i32, i32)) -> i32 {
+                // Corner case: If we have a range that have only one value,
+                // then we just assign everything to the only point
+                if self.1 == self.0 {
+                    return (limit.1 - limit.0) / 2;
+                }
+
                 let logic_length = (*v - self.0) as f64 / (self.1 - self.0) as f64;
+
                 let actual_length = limit.1 - limit.0;
 
                 if actual_length == 0 {
@@ -48,26 +89,17 @@ macro_rules! make_numeric_coord {
 
                 return limit.0 + (actual_length as f64 * logic_length + 1e-3).floor() as i32;
             }
-            fn key_points(&self, max_points: usize) -> Vec<$type> {
-                $key_points((self.0, self.1), max_points)
+            fn key_points<Hint: KeyPointHint>(&self, hint: Hint) -> Vec<$type> {
+                $key_points((self.0, self.1), hint.max_num_points())
             }
             fn range(&self) -> Range<$type> {
                 return self.0..self.1;
             }
         }
-
-        impl ReversibleRanged for $name {
-            fn unmap(&self, p:i32, (min,max): (i32, i32)) -> Option<$type> {
-                if p < min.min(max) || p > max.max(min) {
-                    return None;
-                }
-
-                let logical_offset = (p - min) as f64 / (max - min) as f64;
-
-                return Some(((self.1 - self.0) as f64 * logical_offset + self.0 as f64) as $type);
-            }
-        }
     };
+    ($type:ty, $name:ident, $key_points:ident, $doc: expr) => {
+        make_numeric_coord!($type, $name, $key_points, $doc, DefaultFormatting);
+    }
 }
 
 macro_rules! gen_key_points_comp {
@@ -179,14 +211,38 @@ make_numeric_coord!(
     f32,
     RangedCoordf32,
     compute_f32_key_points,
-    "The ranged coordinate for type f32"
+    "The ranged coordinate for type f32",
+    NoDefaultFormatting
 );
+impl_reverse_mapping_trait!(f32, RangedCoordf32);
+impl ValueFormatter<f32> for RangedCoordf32 {
+    fn format(value: &f32) -> String {
+        crate::data::float::FloatPrettyPrinter {
+            allow_scientific: false,
+            min_decimal: 1,
+            max_decimal: 5,
+        }
+        .print(*value as f64)
+    }
+}
 make_numeric_coord!(
     f64,
     RangedCoordf64,
     compute_f64_key_points,
-    "The ranged coordinate for type f64"
+    "The ranged coordinate for type f64",
+    NoDefaultFormatting
 );
+impl_reverse_mapping_trait!(f64, RangedCoordf64);
+impl ValueFormatter<f64> for RangedCoordf64 {
+    fn format(value: &f64) -> String {
+        crate::data::float::FloatPrettyPrinter {
+            allow_scientific: false,
+            min_decimal: 1,
+            max_decimal: 5,
+        }
+        .print(*value)
+    }
+}
 make_numeric_coord!(
     u32,
     RangedCoordu32,
@@ -256,111 +312,9 @@ impl_ranged_type_trait!(u128, RangedCoordu128);
 impl_ranged_type_trait!(isize, RangedCoordisize);
 impl_ranged_type_trait!(usize, RangedCoordusize);
 
-// TODO: Think about how to re-organize this part
-pub mod group_integer_by {
-    use super::Ranged;
-    use super::{AsRangedCoord, DiscreteRanged};
-    use num_traits::{FromPrimitive, PrimInt, ToPrimitive};
-    use std::ops::{Mul, Range};
-
-    /// The ranged value spec that needs to be grouped.
-    /// This is useful, for example, when we have an X axis is a integer and denotes days.
-    /// And we are expecting the tick mark denotes weeks, in this way we can make the range
-    /// spec grouping by 7 elements.
-    pub struct GroupBy<T>(T, T::ValueType)
-    where
-        T::ValueType: PrimInt + ToPrimitive + FromPrimitive + Mul,
-        T: Ranged;
-
-    /// The trait that provides method `Self::group_by` function which creates a
-    /// `GroupBy` decorated ranged value.
-    pub trait ToGroupByRange
-    where
-        Self: AsRangedCoord,
-        <Self as AsRangedCoord>::Value: PrimInt + ToPrimitive + FromPrimitive + Mul,
-        <<Self as AsRangedCoord>::CoordDescType as Ranged>::ValueType:
-            PrimInt + ToPrimitive + FromPrimitive + Mul,
-    {
-        /// Make a grouping ranged value, see the documentation for `GroupBy` for details.
-        ///
-        /// - `value`: The number of values we want to group it
-        /// - **return**: The newly created grouping range sepcification
-        fn group_by(
-            self,
-            value: <<Self as AsRangedCoord>::CoordDescType as Ranged>::ValueType,
-        ) -> GroupBy<<Self as AsRangedCoord>::CoordDescType> {
-            GroupBy(self.into(), value)
-        }
-    }
-
-    impl<T> ToGroupByRange for T
-    where
-        Self: AsRangedCoord,
-        <Self as AsRangedCoord>::Value: PrimInt + FromPrimitive + ToPrimitive + Mul,
-        <<Self as AsRangedCoord>::CoordDescType as Ranged>::ValueType:
-            PrimInt + FromPrimitive + ToPrimitive + Mul,
-    {
-    }
-
-    impl<T> AsRangedCoord for GroupBy<T>
-    where
-        T::ValueType: PrimInt + ToPrimitive + FromPrimitive + Mul,
-        T: Ranged,
-    {
-        type Value = T::ValueType;
-        type CoordDescType = Self;
-    }
-
-    impl<T> DiscreteRanged for GroupBy<T>
-    where
-        T::ValueType: PrimInt + ToPrimitive + FromPrimitive + Mul,
-        T: Ranged + DiscreteRanged,
-    {
-        type RangeParameter = <T as DiscreteRanged>::RangeParameter;
-        fn get_range_parameter(&self) -> Self::RangeParameter {
-            self.0.get_range_parameter()
-        }
-        fn previous_value(this: &Self::ValueType, param: &Self::RangeParameter) -> Self::ValueType {
-            <T as DiscreteRanged>::previous_value(this, param)
-        }
-        fn next_value(this: &Self::ValueType, param: &Self::RangeParameter) -> Self::ValueType {
-            <T as DiscreteRanged>::next_value(this, param)
-        }
-    }
-
-    impl<T> Ranged for GroupBy<T>
-    where
-        T::ValueType: PrimInt + ToPrimitive + FromPrimitive + Mul,
-        T: Ranged,
-    {
-        type ValueType = T::ValueType;
-        fn map(&self, value: &T::ValueType, limit: (i32, i32)) -> i32 {
-            self.0.map(value, limit)
-        }
-        fn range(&self) -> Range<T::ValueType> {
-            self.0.range()
-        }
-        fn key_points(&self, max_points: usize) -> Vec<T::ValueType> {
-            let actual_range = self.0.range();
-            let from = ((actual_range.start + self.1 - T::ValueType::from_u8(1).unwrap()) / self.1)
-                .to_isize()
-                .unwrap();
-            let to = (actual_range.end / self.1).to_isize().unwrap();
-            let logic_range: super::RangedCoordisize = (from..to).into();
-
-            logic_range
-                .key_points(max_points)
-                .into_iter()
-                .map(|x| T::ValueType::from_isize(x).unwrap() * self.1)
-                .collect()
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::coord::*;
     #[test]
     fn test_key_points() {
         let kp = compute_i32_key_points((0, 999), 28);
@@ -390,6 +344,18 @@ mod test {
     #[test]
     fn test_linear_coord_system() {
         let _coord =
-            RangedCoord::<RangedCoordu32, RangedCoordu32>::new(0..10, 0..10, (0..1024, 0..768));
+            crate::coord::ranged2d::cartesian::Cartesian2d::<RangedCoordu32, RangedCoordu32>::new(
+                0..10,
+                0..10,
+                (0..1024, 0..768),
+            );
+    }
+
+    #[test]
+    fn test_coord_unmap() {
+        let coord: RangedCoordu32 = (0..20).into();
+        let pos = coord.map(&5, (1000, 2000));
+        let value = coord.unmap(pos, (1000, 2000));
+        assert_eq!(value, Some(5));
     }
 }

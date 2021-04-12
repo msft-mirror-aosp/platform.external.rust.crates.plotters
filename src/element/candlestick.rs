@@ -4,9 +4,9 @@
 
 use std::cmp::Ordering;
 
-use crate::drawing::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 use crate::element::{Drawable, PointCollection};
 use crate::style::ShapeStyle;
+use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 
 /// The candlestick data point element
 pub struct CandleStick<X, Y: PartialOrd> {
@@ -62,7 +62,7 @@ impl<X: Clone, Y: PartialOrd> CandleStick<X, Y> {
 }
 
 impl<'a, X: 'a, Y: PartialOrd + 'a> PointCollection<'a, (X, Y)> for &'a CandleStick<X, Y> {
-    type Borrow = &'a (X, Y);
+    type Point = &'a (X, Y);
     type IntoIter = &'a [(X, Y)];
     fn point_iter(self) -> &'a [(X, Y)] {
         &self.points

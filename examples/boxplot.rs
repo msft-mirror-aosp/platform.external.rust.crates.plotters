@@ -42,15 +42,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|(k, v)| (k.0.clone(), k.1.clone(), Quartiles::new(&v)))
         .collect();
 
-    let category = Category::new(
-        "Host",
-        dataset
-            .iter()
-            .unique_by(|x| x.0.clone())
-            .sorted_by(|a, b| b.2.median().partial_cmp(&a.2.median()).unwrap())
-            .map(|x| x.0.clone())
-            .collect(),
-    );
+    let host_list: Vec<_> = dataset
+        .iter()
+        .unique_by(|x| x.0.clone())
+        .sorted_by(|a, b| b.2.median().partial_cmp(&a.2.median()).unwrap())
+        .map(|x| x.0.clone())
+        .collect();
 
     let mut colors = (0..).map(Palette99::pick);
     let mut offsets = (-12..).step_by(24);
@@ -73,23 +70,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .x_label_area_size(40)
         .y_label_area_size(80)
         .caption("Ping Boxplot", ("sans-serif", 20).into_font())
-        .build_ranged(
+        .build_cartesian_2d(
             values_range.start - 1.0..values_range.end + 1.0,
-            category.range(),
+            host_list[..].into_segmented(),
         )?;
 
     chart
         .configure_mesh()
         .x_desc("Ping, ms")
-        .y_desc(category.name())
-        .y_labels(category.len())
-        .line_style_2(&WHITE)
+        .y_desc("Host")
+        .y_labels(host_list.len())
+        .light_line_style(&WHITE)
         .draw()?;
 
     for (label, (values, style, offset)) in &series {
         chart
             .draw_series(values.iter().map(|x| {
-                Boxplot::new_horizontal(category.get(&x.0).unwrap(), &x.1)
+                Boxplot::new_horizontal(SegmentValue::CenterOf(&x.0), &x.1)
                     .width(20)
                     .whisker_width(0.5)
                     .style(style)
@@ -113,7 +110,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         6.0, 7.0, 15.9, 36.9, 39.0, 40.0, 41.0, 42.0, 43.0, 47.0, 49.0,
     ]);
     let quartiles_b = Quartiles::new(&[16.0, 17.0, 50.0, 60.0, 40.2, 41.3, 42.7, 43.3, 47.0]);
-    let category_ab = Category::new("", vec!["a", "b"]);
+
+    let ab_axis = ["a", "b"];
+
     let values_range = fitting_range(
         quartiles_a
             .values()
@@ -124,24 +123,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .x_label_area_size(40)
         .y_label_area_size(40)
         .caption("Vertical Boxplot", ("sans-serif", 20).into_font())
-        .build_ranged(
-            category_ab.clone(),
+        .build_cartesian_2d(
+            ab_axis[..].into_segmented(),
             values_range.start - 10.0..values_range.end + 10.0,
         )?;
 
-    chart.configure_mesh().line_style_2(&WHITE).draw()?;
+    chart.configure_mesh().light_line_style(&WHITE).draw()?;
     chart.draw_series(vec![
-        Boxplot::new_vertical(category_ab.get(&"a").unwrap(), &quartiles_a),
-        Boxplot::new_vertical(category_ab.get(&"b").unwrap(), &quartiles_b),
+        Boxplot::new_vertical(SegmentValue::CenterOf(&"a"), &quartiles_a),
+        Boxplot::new_vertical(SegmentValue::CenterOf(&"b"), &quartiles_b),
     ])?;
 
     let mut chart = ChartBuilder::on(&right)
         .x_label_area_size(40)
         .y_label_area_size(40)
         .caption("Horizontal Boxplot", ("sans-serif", 20).into_font())
-        .build_ranged(-30f32..90f32, 0..3)?;
+        .build_cartesian_2d(-30f32..90f32, 0..3)?;
 
-    chart.configure_mesh().line_style_2(&WHITE).draw()?;
+    chart.configure_mesh().light_line_style(&WHITE).draw()?;
     chart.draw_series(vec![
         Boxplot::new_horizontal(1, &quartiles_a),
         Boxplot::new_horizontal(2, &Quartiles::new(&[30])),
@@ -219,4 +218,8 @@ fn get_data() -> String {
  8.8.8.8	wired	33.1
 ",
     )
+}
+#[test]
+fn entry_point() {
+    main().unwrap()
 }
