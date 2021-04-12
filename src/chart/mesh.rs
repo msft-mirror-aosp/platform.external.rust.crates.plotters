@@ -1,27 +1,29 @@
-use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use super::builder::LabelAreaPosition;
 use super::context::ChartContext;
-use crate::coord::{MeshLine, Ranged, RangedCoord};
-use crate::drawing::backend::DrawingBackend;
+use crate::coord::cartesian::{Cartesian2d, MeshLine};
+use crate::coord::ranged1d::{BoldPoints, LightPoints, Ranged, ValueFormatter};
 use crate::drawing::DrawingAreaErrorKind;
 use crate::style::{
     AsRelative, Color, FontDesc, FontFamily, FontStyle, IntoTextStyle, RGBColor, ShapeStyle,
     SizeDesc, TextStyle,
 };
 
+use plotters_backend::DrawingBackend;
+
 /// The style used to describe the mesh and axis for a secondary coordinate system.
 pub struct SecondaryMeshStyle<'a, 'b, X: Ranged, Y: Ranged, DB: DrawingBackend> {
     style: MeshStyle<'a, 'b, X, Y, DB>,
 }
 
-impl<'a, 'b, X: Ranged, Y: Ranged, DB: DrawingBackend> SecondaryMeshStyle<'a, 'b, X, Y, DB>
+impl<'a, 'b, XT, YT, X: Ranged<ValueType = XT>, Y: Ranged<ValueType = YT>, DB: DrawingBackend>
+    SecondaryMeshStyle<'a, 'b, X, Y, DB>
 where
-    X::ValueType: Debug,
-    Y::ValueType: Debug,
+    X: ValueFormatter<XT>,
+    Y: ValueFormatter<YT>,
 {
-    pub(super) fn new(target: &'b mut ChartContext<'a, DB, RangedCoord<X, Y>>) -> Self {
+    pub(super) fn new(target: &'b mut ChartContext<'a, DB, Cartesian2d<X, Y>>) -> Self {
         let mut style = target.configure_mesh();
         style.draw_x_mesh = false;
         style.draw_y_mesh = false;
@@ -36,7 +38,8 @@ where
     }
 
     /// The offset of x labels. This is used when we want to place the label in the middle of
-    /// the grid. This is useful if we are drawing a histogram
+    /// the grid. This is used to adjust label position for histograms, but since plotters 0.3, this
+    /// use case is deprecated, see [CentricDiscreteRanged coord decorator](../coord/trait.IntoCentric.html) for more details
     /// - `value`: The offset in pixel
     pub fn x_label_offset<S: SizeDesc>(&mut self, value: S) -> &mut Self {
         self.style.x_label_offset(value);
@@ -44,7 +47,8 @@ where
     }
 
     /// The offset of y labels. This is used when we want to place the label in the middle of
-    /// the grid. This is useful if we are drawing a histogram
+    /// the grid. This is used to adjust label position for histograms, but since plotters 0.3, this
+    /// use case is deprecated, see [CentricDiscreteRanged coord decorator](../coord/trait.IntoCentric.html) for more details
     /// - `value`: The offset in pixel
     pub fn y_label_offset<S: SizeDesc>(&mut self, value: S) -> &mut Self {
         self.style.y_label_offset(value);
@@ -137,10 +141,7 @@ where
 }
 
 /// The struct that is used for tracking the configuration of a mesh of any chart
-pub struct MeshStyle<'a, 'b, X: Ranged, Y: Ranged, DB>
-where
-    DB: DrawingBackend,
-{
+pub struct MeshStyle<'a, 'b, X: Ranged, Y: Ranged, DB: DrawingBackend> {
     pub(super) parent_size: (u32, u32),
     pub(super) draw_x_mesh: bool,
     pub(super) draw_y_mesh: bool,
@@ -153,17 +154,66 @@ where
     pub(super) axis_desc_style: Option<TextStyle<'b>>,
     pub(super) x_desc: Option<String>,
     pub(super) y_desc: Option<String>,
-    pub(super) line_style_1: Option<ShapeStyle>,
-    pub(super) line_style_2: Option<ShapeStyle>,
+    pub(super) bold_line_style: Option<ShapeStyle>,
+    pub(super) light_line_style: Option<ShapeStyle>,
     pub(super) axis_style: Option<ShapeStyle>,
     pub(super) x_label_style: Option<TextStyle<'b>>,
     pub(super) y_label_style: Option<TextStyle<'b>>,
     pub(super) format_x: &'b dyn Fn(&X::ValueType) -> String,
     pub(super) format_y: &'b dyn Fn(&Y::ValueType) -> String,
-    pub(super) target: Option<&'b mut ChartContext<'a, DB, RangedCoord<X, Y>>>,
+    pub(super) target: Option<&'b mut ChartContext<'a, DB, Cartesian2d<X, Y>>>,
     pub(super) _phantom_data: PhantomData<(X, Y)>,
     pub(super) x_tick_size: [i32; 2],
     pub(super) y_tick_size: [i32; 2],
+}
+
+impl<'a, 'b, X, Y, XT, YT, DB> MeshStyle<'a, 'b, X, Y, DB>
+where
+    X: Ranged<ValueType = XT> + ValueFormatter<XT>,
+    Y: Ranged<ValueType = YT> + ValueFormatter<YT>,
+    DB: DrawingBackend,
+{
+    pub(crate) fn new(chart: &'b mut ChartContext<'a, DB, Cartesian2d<X, Y>>) -> Self {
+        let base_tick_size = (5u32).percent().max(5).in_pixels(chart.plotting_area());
+
+        let mut x_tick_size = [base_tick_size, base_tick_size];
+        let mut y_tick_size = [base_tick_size, base_tick_size];
+
+        for idx in 0..2 {
+            if chart.is_overlapping_drawing_area(chart.x_label_area[idx].as_ref()) {
+                x_tick_size[idx] = -x_tick_size[idx];
+            }
+            if chart.is_overlapping_drawing_area(chart.y_label_area[idx].as_ref()) {
+                y_tick_size[idx] = -y_tick_size[idx];
+            }
+        }
+
+        MeshStyle {
+            parent_size: chart.drawing_area.dim_in_pixel(),
+            axis_style: None,
+            x_label_offset: 0,
+            y_label_offset: 0,
+            draw_x_mesh: true,
+            draw_y_mesh: true,
+            draw_x_axis: true,
+            draw_y_axis: true,
+            n_x_labels: 10,
+            n_y_labels: 10,
+            bold_line_style: None,
+            light_line_style: None,
+            x_label_style: None,
+            y_label_style: None,
+            format_x: &X::format,
+            format_y: &Y::format,
+            target: Some(chart),
+            _phantom_data: PhantomData,
+            x_desc: None,
+            y_desc: None,
+            axis_desc_style: None,
+            x_tick_size,
+            y_tick_size,
+        }
+    }
 }
 
 impl<'a, 'b, X, Y, DB> MeshStyle<'a, 'b, X, Y, DB>
@@ -201,7 +251,8 @@ where
     }
 
     /// The offset of x labels. This is used when we want to place the label in the middle of
-    /// the grid. This is useful if we are drawing a histogram
+    /// the grid. This is used to adjust label position for histograms, but since plotters 0.3, this
+    /// use case is deprecated, see [CentricDiscreteRanged coord decorator](../coord/trait.IntoCentric.html) for more details
     /// - `value`: The offset in pixel
     pub fn x_label_offset<S: SizeDesc>(&mut self, value: S) -> &mut Self {
         self.x_label_offset = value.in_pixels(&self.parent_size);
@@ -209,7 +260,8 @@ where
     }
 
     /// The offset of y labels. This is used when we want to place the label in the middle of
-    /// the grid. This is useful if we are drawing a histogram
+    /// the grid. This is used to adjust label position for histograms, but since plotters 0.3, this
+    /// use case is deprecated, see [CentricDiscreteRanged coord decorator](../coord/trait.IntoCentric.html) for more details
     /// - `value`: The offset in pixel
     pub fn y_label_offset<S: SizeDesc>(&mut self, value: S) -> &mut Self {
         self.y_label_offset = value.in_pixels(&self.parent_size);
@@ -272,15 +324,15 @@ where
 
     /// Set the style for the coarse grind grid
     /// - `style`: This is the coarse grind grid style
-    pub fn line_style_1<T: Into<ShapeStyle>>(&mut self, style: T) -> &mut Self {
-        self.line_style_1 = Some(style.into());
+    pub fn bold_line_style<T: Into<ShapeStyle>>(&mut self, style: T) -> &mut Self {
+        self.bold_line_style = Some(style.into());
         self
     }
 
     /// Set the style for the fine grind grid
     /// - `style`: The fine grind grid style
-    pub fn line_style_2<T: Into<ShapeStyle>>(&mut self, style: T) -> &mut Self {
-        self.line_style_2 = Some(style.into());
+    pub fn light_line_style<T: Into<ShapeStyle>>(&mut self, style: T) -> &mut Self {
+        self.light_line_style = Some(style.into());
         self
     }
 
@@ -357,12 +409,12 @@ where
             FontStyle::Normal,
         );
 
-        let mesh_style_1 = self
-            .line_style_1
+        let bold_style = self
+            .bold_line_style
             .clone()
             .unwrap_or_else(|| (&default_mesh_color_1).into());
-        let mesh_style_2 = self
-            .line_style_2
+        let light_style = self
+            .light_line_style
             .clone()
             .unwrap_or_else(|| (&default_mesh_color_2).into());
         let axis_style = self
@@ -386,8 +438,11 @@ where
             .unwrap_or_else(|| x_label_style.clone());
 
         target.draw_mesh(
-            (self.n_y_labels * 10, self.n_x_labels * 10),
-            &mesh_style_2,
+            (
+                LightPoints::new(self.n_y_labels, self.n_y_labels * 10),
+                LightPoints::new(self.n_x_labels, self.n_x_labels * 10),
+            ),
+            &light_style,
             &x_label_style,
             &y_label_style,
             |_| None,
@@ -406,8 +461,8 @@ where
         )?;
 
         target.draw_mesh(
-            (self.n_y_labels, self.n_x_labels),
-            &mesh_style_1,
+            (BoldPoints(self.n_y_labels), BoldPoints(self.n_x_labels)),
+            &bold_style,
             &x_label_style,
             &y_label_style,
             |m| match m {

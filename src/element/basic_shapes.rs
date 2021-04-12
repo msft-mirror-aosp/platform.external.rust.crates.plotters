@@ -1,6 +1,6 @@
 use super::{Drawable, PointCollection};
-use crate::drawing::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 use crate::style::{ShapeStyle, SizeDesc};
+use plotters_backend::{BackendCoord, BackendStyle, DrawingBackend, DrawingErrorKind};
 
 /// An element of a single pixel
 pub struct Pixel<Coord> {
@@ -18,7 +18,7 @@ impl<Coord> Pixel<Coord> {
 }
 
 impl<'a, Coord> PointCollection<'a, Coord> for &'a Pixel<Coord> {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = std::iter::Once<&'a Coord>;
     fn point_iter(self) -> Self::IntoIter {
         std::iter::once(&self.pos)
@@ -33,7 +33,7 @@ impl<Coord, DB: DrawingBackend> Drawable<DB> for Pixel<Coord> {
         _: (u32, u32),
     ) -> Result<(), DrawingErrorKind<DB::ErrorType>> {
         if let Some((x, y)) = points.next() {
-            return backend.draw_pixel((x, y), &self.style.color);
+            return backend.draw_pixel((x, y), self.style.color());
         }
         Ok(())
     }
@@ -81,7 +81,7 @@ impl<Coord> PathElement<Coord> {
 }
 
 impl<'a, Coord> PointCollection<'a, Coord> for &'a PathElement<Coord> {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = &'a [Coord];
     fn point_iter(self) -> &'a [Coord] {
         &self.points
@@ -153,7 +153,7 @@ impl<Coord> Rectangle<Coord> {
 }
 
 impl<'a, Coord> PointCollection<'a, Coord> for &'a Rectangle<Coord> {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = &'a [Coord];
     fn point_iter(self) -> &'a [Coord] {
         &self.points
@@ -200,7 +200,7 @@ fn test_rect_element() {
         });
         da.draw(&Rectangle::new(
             [(100, 101), (105, 107)],
-            BLUE.stroke_width(5),
+            Color::stroke_width(&BLUE, 5),
         ))
         .expect("Drawing Failure");
     }
@@ -245,7 +245,7 @@ impl<Coord, Size: SizeDesc> Circle<Coord, Size> {
 }
 
 impl<'a, Coord, Size: SizeDesc> PointCollection<'a, Coord> for &'a Circle<Coord, Size> {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = std::iter::Once<&'a Coord>;
     fn point_iter(self) -> std::iter::Once<&'a Coord> {
         std::iter::once(&self.center)
@@ -306,7 +306,7 @@ impl<Coord> Polygon<Coord> {
 }
 
 impl<'a, Coord> PointCollection<'a, Coord> for &'a Polygon<Coord> {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = &'a [Coord];
     fn point_iter(self) -> &'a [Coord] {
         &self.points

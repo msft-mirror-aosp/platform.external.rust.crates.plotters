@@ -1,5 +1,37 @@
 # Changelog
 
+## Plotters 0.3.0 (2020-09-03)
+This is the next major release of Plotters, see [release notes](./RELEASE-NOTES.md) for more detials.
+
+### Added
+
+- The plotters backend API crate is introduced which allows third-party backend.
+- Allow slice used as a coordinate if the item type implements `PartialOrd`.
+- Linspace coordinate type, which allows define a discrete coordinate on continous value types (such as f32, DateTime, etc) with a step specification
+- Nested coordinate type, now we support define pair of category and nested values as nested coordinate.
+- Introduce backend crates: plotters-bitmap, plotters-svg, plotters-cairo, plotters-canvas, plotters-console
+- 3D Plotting features
+
+### Fixed
+
+- Adjust Canvas backend size with DPR (Thanks to Marius-Mueller)
+
+### Improvement
+
+- Enhanced key point algorithms: New key point hint trait are used for key point algorithms && many improvment on key point algorithms for different types
+- Renamed `MeshStyle::line\_style\_1\ and `MeshStyle::line\_style\_2` to `bold\_line\_style` and `light\_line\_style`
+- Reorganize the "plotters::coord" namespace 
+- Improved discrete coordinate trait
+- Split backend code into isolated crates and can be maintained indepdendenly
+- Category coordinate is now replaced by slice coordinate
+- Removing the requirement for `Debug` trait for chart coordinate, allows ranged coordinate define its own formatting function. 
+
+### Removed
+
+- The `Path` name alias for `PathElement`
+- Most code `plotters::drawing::backend\_impl::\* ` (expect `MockedBackend` for testing purpose) is removed due to crate split. 
+- Piston backend due to the Piston project seems not actively developing
+
 ## Plotters 0.2.15 (2020-05-26)
 ### Fixed
 

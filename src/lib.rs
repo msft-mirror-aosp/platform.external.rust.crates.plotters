@@ -264,7 +264,7 @@ including bitmap, vector graph, piston window, GTK/Cairo and WebAssembly.
 To use Plotters, you can simply add Plotters into your `Cargo.toml`
 ```toml
 [dependencies]
-plotters = "^0.2.15"
+plotters = "^0.3.0"
 ```
 
 And the following code draws a quadratic function. `src/main.rs`,
@@ -484,13 +484,14 @@ For example, we can have an element which includes a dot and its coordinate.
 
 ```rust
 use plotters::prelude::*;
+use plotters::coord::types::RangedCoordf32;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = BitMapBackend::new("plotters-doc-data/4.png", (640, 480)).into_drawing_area();
 
     root.fill(&RGBColor(240, 200, 200))?;
 
-    let root = root.apply_coord_spec(RangedCoord::<RangedCoordf32, RangedCoordf32>::new(
+    let root = root.apply_coord_spec(Cartesian2d::<RangedCoordf32, RangedCoordf32>::new(
         0f32..1f32,
         0f32..1f32,
         (0..640, 0..480),
@@ -536,7 +537,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .x_label_area_size(20)
         .y_label_area_size(40)
         // Finally attach a coordinate on the drawing area and make a chart context
-        .build_ranged(0f32..10f32, 0f32..10f32)?;
+        .build_cartesian_2d(0f32..10f32, 0f32..10f32)?;
 
     // Then we can draw a mesh
     chart
@@ -607,15 +608,13 @@ By doing so, you can minimize the number of dependencies down to only `itertools
 
 The following list is a complete list of features that can be opt in and out.
 
-- Drawing backends related features
+- Tier 1 drawing backends
 
 | Name    |  Description | Additional Dependency |Default?|
 |---------|--------------|--------|------------|
-| image\_encoder  | Allow `BitMapBackend` save the result to bitmap files | image, rusttype, font-kit | Yes |
-| svg     | Enable `SVGBackend` Support | None | Yes |
-| gif\_backend| Opt-in GIF animation Rendering support for `BitMapBackend`, implies `bitmap` enabled | gif | Yes |
-| piston | Enable `PistonWindowBackend` | piston\_window, rusttype, font-kit | No |
-| cairo | Enable `CairoBackend` | cairo-rs, rusttype, font-kit | No |
+| bitmap\_encoder  | Allow `BitMapBackend` save the result to bitmap files | image, rusttype, font-kit | Yes |
+| svg\_backend     | Enable `SVGBackend` Support | None | Yes |
+| bitmap\_gif| Opt-in GIF animation Rendering support for `BitMapBackend`, implies `bitmap` enabled | gif | Yes |
 
 - Font manipulation features
 
@@ -696,24 +695,39 @@ pub mod style;
 pub mod evcxr;
 
 #[cfg(test)]
-pub use crate::drawing::create_mocked_drawing_area;
+pub use crate::drawing::{check_color, create_mocked_drawing_area};
 
 #[cfg(feature = "palette_ext")]
 pub use palette;
 
 /// The module imports the most commonly used types and modules in Plotters
 pub mod prelude {
+    // Chart related types
     pub use crate::chart::{ChartBuilder, ChartContext, LabelAreaPosition, SeriesLabelPosition};
+
+    // Coordinates
     pub use crate::coord::{
-        Category, CoordTranslate, GroupBy, IntoCentric, IntoPartialAxis, LogCoord, LogRange,
-        LogScalable, Ranged, RangedCoord, RangedCoordf32, RangedCoordf64, RangedCoordi32,
-        RangedCoordi64, RangedCoordu32, RangedCoordu64, ToGroupByRange,
+        cartesian::Cartesian2d,
+        combinators::{
+            make_partial_axis, BindKeyPointMethod, BindKeyPoints, BuildNestedCoord, GroupBy,
+            IntoLinspace, IntoLogRange, IntoPartialAxis, Linspace, LogCoord, LogRange, LogScalable,
+            NestedRange, NestedValue, ToGroupByRange,
+        },
+        ranged1d::{DiscreteRanged, IntoSegmentedCoord, Ranged, SegmentValue},
+        CoordTranslate,
     };
 
     #[cfg(feature = "chrono")]
-    pub use crate::coord::{make_partial_axis, RangedDate, RangedDateTime, RangedDuration};
+    pub use crate::coord::types::{
+        IntoMonthly, IntoYearly, RangedDate, RangedDateTime, RangedDuration,
+    };
+
+    // Re-export the backend for backward compatibility
+    pub use plotters_backend::DrawingBackend;
 
     pub use crate::drawing::*;
+
+    // Series helpers
     #[cfg(feature = "area_series")]
     pub use crate::series::AreaSeries;
     #[cfg(feature = "histogram")]
@@ -722,14 +736,17 @@ pub mod prelude {
     pub use crate::series::LineSeries;
     #[cfg(feature = "point_series")]
     pub use crate::series::PointSeries;
+    #[cfg(feature = "surface_series")]
+    pub use crate::series::SurfaceSeries;
 
+    // Styles
     pub use crate::style::{
         AsRelative, Color, FontDesc, FontFamily, FontStyle, FontTransform, HSLColor, IntoFont,
-        Palette, Palette100, Palette99, Palette9999, PaletteColor, RGBColor, ShapeStyle,
-        SimpleColor, TextStyle,
+        Palette, Palette100, Palette99, Palette9999, PaletteColor, RGBColor, ShapeStyle, TextStyle,
     };
     pub use crate::style::{BLACK, BLUE, CYAN, GREEN, MAGENTA, RED, TRANSPARENT, WHITE, YELLOW};
 
+    // Elements
     pub use crate::element::{
         Circle, Cross, DynElement, EmptyElement, IntoDynElement, MultiLineText, PathElement, Pixel,
         Polygon, Rectangle, Text, TriangleMarker,
@@ -742,9 +759,10 @@ pub mod prelude {
     #[cfg(feature = "errorbar")]
     pub use crate::element::ErrorBar;
 
-    #[cfg(feature = "bitmap")]
+    #[cfg(feature = "bitmap_backend")]
     pub use crate::element::BitMapElement;
 
+    // Data
     pub use crate::data::Quartiles;
 
     // TODO: This should be deprecated and completely removed
@@ -761,4 +779,11 @@ pub mod prelude {
 
     #[cfg(feature = "evcxr")]
     pub use crate::evcxr::evcxr_figure;
+
+    // Re-export tier 1 backends for backward compatibility
+    #[cfg(feature = "bitmap_backend")]
+    pub use plotters_bitmap::BitMapBackend;
+
+    #[cfg(feature = "svg_backend")]
+    pub use plotters_svg::SVGBackend;
 }
