@@ -1,12 +1,17 @@
 use super::context::ChartContext;
 
-use crate::coord::{AsRangedCoord, RangedCoord, Shift};
-use crate::drawing::backend::DrawingBackend;
+use crate::coord::cartesian::{Cartesian2d, Cartesian3d};
+use crate::coord::ranged1d::AsRangedCoord;
+use crate::coord::Shift;
+
 use crate::drawing::{DrawingArea, DrawingAreaErrorKind};
 use crate::style::{IntoTextStyle, SizeDesc, TextStyle};
 
+use plotters_backend::DrawingBackend;
+
 /// The enum used to specify the position of label area.
-/// This is used when we configure the label area size with the API `set_label_area_size`
+/// This is used when we configure the label area size with the API
+/// [ChartBuilder::set_label_area_size](struct ChartBuilder.html#method.set_label_area_size)
 #[derive(Copy, Clone)]
 pub enum LabelAreaPosition {
     Top = 0,
@@ -150,18 +155,33 @@ impl<'a, 'b, DB: DrawingBackend> ChartBuilder<'a, 'b, DB> {
         self
     }
 
+    #[allow(clippy::type_complexity)]
+    #[deprecated(
+        note = "`build_ranged` has been renamed to `build_cartesian_2d` and is to be removed in the future."
+    )]
+    pub fn build_ranged<X: AsRangedCoord, Y: AsRangedCoord>(
+        &mut self,
+        x_spec: X,
+        y_spec: Y,
+    ) -> Result<
+        ChartContext<'a, DB, Cartesian2d<X::CoordDescType, Y::CoordDescType>>,
+        DrawingAreaErrorKind<DB::ErrorType>,
+    > {
+        self.build_cartesian_2d(x_spec, y_spec)
+    }
+
     /// Build the chart with a 2D Cartesian coordinate system. The function will returns a chart
     /// context, where data series can be rendered on.
     /// - `x_spec`: The specification of X axis
     /// - `y_spec`: The specification of Y axis
     /// - Returns: A chart context
     #[allow(clippy::type_complexity)]
-    pub fn build_ranged<X: AsRangedCoord, Y: AsRangedCoord>(
+    pub fn build_cartesian_2d<X: AsRangedCoord, Y: AsRangedCoord>(
         &mut self,
         x_spec: X,
         y_spec: Y,
     ) -> Result<
-        ChartContext<'a, DB, RangedCoord<X::CoordDescType, Y::CoordDescType>>,
+        ChartContext<'a, DB, Cartesian2d<X::CoordDescType, Y::CoordDescType>>,
         DrawingAreaErrorKind<DB::ErrorType>,
     > {
         let mut label_areas = [None, None, None, None];
@@ -204,6 +224,18 @@ impl<'a, 'b, DB: DrawingBackend> ChartBuilder<'a, 'b, DB> {
             actual_drawing_area_pos[idx] += split_point;
         }
 
+        // Now the root drawing area is to be split into
+        //
+        // +----------+------------------------------+------+
+        // |    0     |    1 (Top Label Area)        |   2  |
+        // +----------+------------------------------+------+
+        // |    3     |                              |   5  |
+        // |  Left    |       4 (Plotting Area)      | Right|
+        // |  Labels  |                              | Label|
+        // +----------+------------------------------+------+
+        // |    6     |        7 (Bottom Labels)     |   8  |
+        // +----------+------------------------------+------+
+
         let mut split: Vec<_> = drawing_area
             .split_by_breakpoints(
                 &actual_drawing_area_pos[2..4],
@@ -213,8 +245,11 @@ impl<'a, 'b, DB: DrawingBackend> ChartBuilder<'a, 'b, DB> {
             .map(Some)
             .collect();
 
+        // Take out the plotting area
         std::mem::swap(&mut drawing_area, split[4].as_mut().unwrap());
 
+        // Initialize the label areas - since the label area might be overlapping
+        // with the plotting area, in this case, we need handle them differently
         for (src_idx, dst_idx) in [1, 7, 3, 5].iter().zip(0..4) {
             if !self.overlap_plotting_area[dst_idx] {
                 let (h, w) = split[*src_idx].as_ref().unwrap().dim_in_pixel();
@@ -259,7 +294,7 @@ impl<'a, 'b, DB: DrawingBackend> ChartBuilder<'a, 'b, DB> {
         Ok(ChartContext {
             x_label_area,
             y_label_area,
-            drawing_area: drawing_area.apply_coord_spec(RangedCoord::new(
+            drawing_area: drawing_area.apply_coord_spec(Cartesian2d::new(
                 x_spec,
                 y_spec,
                 pixel_range,
@@ -268,6 +303,60 @@ impl<'a, 'b, DB: DrawingBackend> ChartBuilder<'a, 'b, DB> {
             drawing_area_pos: (
                 actual_drawing_area_pos[2] + title_dx + self.margin[2] as i32,
                 actual_drawing_area_pos[0] + title_dy + self.margin[0] as i32,
+            ),
+        })
+    }
+
+    /// Build a 3 dimensional cartesian chart. The function will returns a chart
+    /// context, where data series can be rendered on.
+    /// - `x_spec`: The specification of X axis
+    /// - `y_spec`: The specification of Y axis
+    /// - `z_sepc`: The specification of Z axis
+    /// - Returns: A chart context
+    pub fn build_cartesian_3d<X: AsRangedCoord, Y: AsRangedCoord, Z: AsRangedCoord>(
+        &mut self,
+        x_spec: X,
+        y_spec: Y,
+        z_spec: Z,
+    ) -> Result<
+        ChartContext<'a, DB, Cartesian3d<X::CoordDescType, Y::CoordDescType, Z::CoordDescType>>,
+        DrawingAreaErrorKind<DB::ErrorType>,
+    > {
+        let mut drawing_area = DrawingArea::clone(self.root_area);
+
+        if *self.margin.iter().max().unwrap_or(&0) > 0 {
+            drawing_area = drawing_area.margin(
+                self.margin[0] as i32,
+                self.margin[1] as i32,
+                self.margin[2] as i32,
+                self.margin[3] as i32,
+            );
+        }
+
+        let (title_dx, title_dy) = if let Some((ref title, ref style)) = self.title {
+            let (origin_dx, origin_dy) = drawing_area.get_base_pixel();
+            drawing_area = drawing_area.titled(title, style.clone())?;
+            let (current_dx, current_dy) = drawing_area.get_base_pixel();
+            (current_dx - origin_dx, current_dy - origin_dy)
+        } else {
+            (0, 0)
+        };
+
+        let pixel_range = drawing_area.get_pixel_range();
+
+        Ok(ChartContext {
+            x_label_area: [None, None],
+            y_label_area: [None, None],
+            drawing_area: drawing_area.apply_coord_spec(Cartesian3d::new(
+                x_spec,
+                y_spec,
+                z_spec,
+                pixel_range,
+            )),
+            series_anno: vec![],
+            drawing_area_pos: (
+                title_dx + self.margin[2] as i32,
+                title_dy + self.margin[0] as i32,
             ),
         })
     }
@@ -334,10 +423,7 @@ mod test {
         assert_eq!(chart.title.as_ref().unwrap().0, "This is a test case");
         assert_eq!(chart.title.as_ref().unwrap().1.font.get_name(), "serif");
         assert_eq!(chart.title.as_ref().unwrap().1.font.get_size(), 10.0);
-        assert_eq!(
-            chart.title.as_ref().unwrap().1.color.to_rgba(),
-            BLACK.to_rgba()
-        );
+        check_color(chart.title.as_ref().unwrap().1.color, BLACK.to_rgba());
 
         chart.caption("This is a test case", ("serif", 10));
         assert_eq!(chart.title.as_ref().unwrap().1.font.get_name(), "serif");
