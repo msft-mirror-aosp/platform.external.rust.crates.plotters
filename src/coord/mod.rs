@@ -1,89 +1,57 @@
 /*!
-Coordinate system abstractions.
 
-Coordinate systems can be attached to drawing areas. By doing so,
-the drawing area can draw elements in the guest coordinate system.
-`DrawingArea::apply_coord_spec` is used to attach new coordinate system
-to the drawing area.
+One of the key features of Plotters is flexible coordinate system abstraction and this module
+provides all the abstraction used for the coordinate abstarction of Plotters.
 
-`CoordTranslate` is the trait required by `DrawingArea::apply_coord_spec`. It provides
-the forward coordinate translation: from the logic coordinate to the pixel-based absolute
-backend coordinate system.
+Generally speaking, the coordinate system in Plotters is responsible for mapping logic data points into
+pixel based backend coordinate. This task is abstracted by a simple trait called
+[CoordTranslate](trait.CoordTranslate.html). Please note `CoordTranslate` trait doesn't assume any property
+about the coordinate values, thus we are able to extend Plotters's coordinate system to other types of coorindate
+easily.
 
-When the coordinate type implements `ReverseCoordTranslate`,
-the backward translation is possible, which allows mapping pixel-based coordinate into
-the logic coordinate. It's not usually used for static figure rendering, but may be useful
-for a interactive figure.
+Another important trait is [ReverseCoordTranslate](trait.ReverseCoordTranslate.html). This trait allows some coordinate
+retrieve the logic value based on the pixel-based backend coordinate. This is particularly interesting for interactive plots.
 
-`RangedCoord` is the 2D cartesian coordinate system that has two `Ranged` axis.
-A ranged axis can be logarithmic and by applying an logarithmic axis, the figure is logarithmic scale.
-Also, the ranged axis can be deserted, and this is required by the histogram series.
+Plotters contains a set of pre-defined coordinate specifications that fulfills the most common use. See documentation for
+module [types](types/index.html) for details about the basic 1D types.
+
+The coordinate system also can be tweaked by the coordinate combinators, such as logarithmic coordinate, nested coordinate, etc.
+See documentation for module [combinators](combinators/index.html)  for details.
+
+Currently we support the following 2D coordinate system:
+
+- 2-dimensional Cartesian Coordinate: This is done by the combinator [Cartesian2d](cartesian/struct.Cartesian2d.html).
 
 */
-use crate::drawing::backend::BackendCoord;
 
-mod category;
-#[cfg(feature = "chrono")]
-mod datetime;
-mod logarithmic;
-mod numeric;
-mod ranged;
+use plotters_backend::BackendCoord;
 
-#[cfg(feature = "chrono")]
-pub use datetime::{IntoMonthly, IntoYearly, RangedDate, RangedDateTime, RangedDuration};
-pub use numeric::{
-    RangedCoordf32, RangedCoordf64, RangedCoordi128, RangedCoordi32, RangedCoordi64,
-    RangedCoordu128, RangedCoordu32, RangedCoordu64,
-};
-pub use ranged::{
-    AsRangedCoord, DiscreteRanged, IntoCentric, IntoPartialAxis, MeshLine, Ranged, RangedCoord,
-    ReversibleRanged,
-};
+pub mod ranged1d;
 
-pub use ranged::make_partial_axis;
-
-pub use logarithmic::{LogCoord, LogRange, LogScalable};
-
-pub use numeric::group_integer_by::{GroupBy, ToGroupByRange};
-use std::rc::Rc;
-use std::sync::Arc;
-
-pub use category::Category;
-
-/// The trait that translates some customized object to the backend coordinate
-pub trait CoordTranslate {
-    type From;
-
-    /// Translate the guest coordinate to the guest coordinate
-    fn translate(&self, from: &Self::From) -> BackendCoord;
+///  The coordinate combinators
+///
+/// Coordinate combinators are very important part of Plotters' coordinate system.
+/// The combinator is more about the "combinator pattern", which takes one or more coordinate specification
+/// and transform them into a new coordinate specification.
+pub mod combinators {
+    pub use super::ranged1d::combinators::*;
 }
 
-impl<T: CoordTranslate> CoordTranslate for Rc<T> {
-    type From = T::From;
-
-    fn translate(&self, from: &Self::From) -> BackendCoord {
-        self.as_ref().translate(from)
-    }
+/// The primitive types supported by Plotters coordinate system
+pub mod types {
+    pub use super::ranged1d::types::*;
 }
 
-impl<T: CoordTranslate> CoordTranslate for Arc<T> {
-    type From = T::From;
+mod ranged2d;
+pub mod ranged3d;
 
-    fn translate(&self, from: &Self::From) -> BackendCoord {
-        self.as_ref().translate(from)
-    }
+pub mod cartesian {
+    pub use super::ranged2d::cartesian::{Cartesian2d, MeshLine};
+    pub use super::ranged3d::Cartesian3d;
 }
 
-/// The trait indicates that the coordinate system supports reverse transform
-/// This is useful when we need an interactive plot, thus we need to map the event
-/// from the backend coordinate to the logical coordinate
-pub trait ReverseCoordTranslate: CoordTranslate {
-    /// Reverse translate the coordinate from the drawing coordinate to the
-    /// logic coordinate.
-    /// Note: the return value is an option, because it's possible that the drawing
-    /// coordinate isn't able to be represented in te guest coordinate system
-    fn reverse_translate(&self, input: BackendCoord) -> Option<Self::From>;
-}
+mod translate;
+pub use translate::{CoordTranslate, ReverseCoordTranslate};
 
 /// The coordinate translation that only impose shift
 #[derive(Debug, Clone)]
@@ -99,22 +67,5 @@ impl CoordTranslate for Shift {
 impl ReverseCoordTranslate for Shift {
     fn reverse_translate(&self, input: BackendCoord) -> Option<BackendCoord> {
         Some((input.0 - (self.0).0, input.1 - (self.0).1))
-    }
-}
-
-/// We can compose an arbitrary transformation with a shift
-pub struct ShiftAndTrans<T: CoordTranslate>(Shift, T);
-
-impl<T: CoordTranslate> CoordTranslate for ShiftAndTrans<T> {
-    type From = T::From;
-    fn translate(&self, from: &Self::From) -> BackendCoord {
-        let temp = self.1.translate(from);
-        self.0.translate(&temp)
-    }
-}
-
-impl<T: ReverseCoordTranslate> ReverseCoordTranslate for ShiftAndTrans<T> {
-    fn reverse_translate(&self, input: BackendCoord) -> Option<T::From> {
-        Some(self.1.reverse_translate(self.0.reverse_translate(input)?)?)
     }
 }

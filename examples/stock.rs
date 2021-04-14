@@ -21,9 +21,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .x_label_area_size(40)
         .y_label_area_size(40)
         .caption("MSFT Stock Price", ("sans-serif", 50.0).into_font())
-        .build_ranged(from_date..to_date, 110f32..135f32)?;
+        .build_cartesian_2d(from_date..to_date, 110f32..135f32)?;
 
-    chart.configure_mesh().line_style_2(&WHITE).draw()?;
+    chart.configure_mesh().light_line_style(&WHITE).draw()?;
 
     chart.draw_series(
         data.iter()
@@ -66,4 +66,8 @@ fn get_data() -> Vec<(&'static str, f32, f32, f32, f32)> {
         ("2019-03-15", 115.3400, 117.2500, 114.5900, 115.9100),
         ("2019-03-14", 114.5400, 115.2000, 114.3300, 114.5900),
     ];
+}
+#[test]
+fn entry_point() {
+    main().unwrap()
 }

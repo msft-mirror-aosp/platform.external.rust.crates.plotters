@@ -1,6 +1,6 @@
-use crate::drawing::DrawingBackend;
 use crate::element::{Circle, DynElement, IntoDynElement, PathElement};
 use crate::style::ShapeStyle;
+use plotters_backend::DrawingBackend;
 use std::marker::PhantomData;
 
 /// The line series object, which takes an iterator of points in guest coordinate system
@@ -73,7 +73,7 @@ mod test {
         });
 
         let mut chart = ChartBuilder::on(&drawing_area)
-            .build_ranged(0..100, 0..100)
+            .build_cartesian_2d(0..100, 0..100)
             .expect("Build chart error");
 
         chart
