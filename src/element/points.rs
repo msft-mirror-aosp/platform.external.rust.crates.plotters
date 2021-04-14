@@ -1,7 +1,7 @@
 use super::*;
 use super::{Drawable, PointCollection};
-use crate::drawing::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 use crate::style::{ShapeStyle, SizeDesc};
+use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 
 /// The element that used to describe a point
 pub trait PointElement<Coord, Size: SizeDesc> {
@@ -26,7 +26,7 @@ impl<Coord, Size: SizeDesc> Cross<Coord, Size> {
 }
 
 impl<'a, Coord: 'a, Size: SizeDesc> PointCollection<'a, Coord> for &'a Cross<Coord, Size> {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = std::iter::Once<&'a Coord>;
     fn point_iter(self) -> std::iter::Once<&'a Coord> {
         std::iter::once(&self.center)
@@ -69,7 +69,7 @@ impl<Coord, Size: SizeDesc> TriangleMarker<Coord, Size> {
 }
 
 impl<'a, Coord: 'a, Size: SizeDesc> PointCollection<'a, Coord> for &'a TriangleMarker<Coord, Size> {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = std::iter::Once<&'a Coord>;
     fn point_iter(self) -> std::iter::Once<&'a Coord> {
         std::iter::once(&self.center)
