@@ -12,14 +12,19 @@ In Plotters, a series is abstracted as an iterator of elements.
 detailed description for each struct.
 */
 
+mod axes3d;
 mod builder;
 mod context;
 mod dual_coord;
 mod mesh;
 mod series;
+mod state;
 
 pub use builder::{ChartBuilder, LabelAreaPosition};
-pub use context::{ChartContext, ChartState, SeriesAnno};
+pub use context::ChartContext;
 pub use dual_coord::{DualCoordChartContext, DualCoordChartState};
-pub use mesh::MeshStyle;
-pub use series::{SeriesLabelPosition, SeriesLabelStyle};
+pub use mesh::{MeshStyle, SecondaryMeshStyle};
+pub use series::{SeriesAnno, SeriesLabelPosition, SeriesLabelStyle};
+pub use state::ChartState;
+
+use context::Coord3D;

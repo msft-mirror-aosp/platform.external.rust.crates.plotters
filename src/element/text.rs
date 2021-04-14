@@ -2,8 +2,8 @@ use std::borrow::Borrow;
 use std::i32;
 
 use super::{Drawable, PointCollection};
-use crate::drawing::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 use crate::style::{FontDesc, FontResult, LayoutBox, TextStyle};
+use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 
 /// A single line text element. This can be owned or borrowed string, dependents on
 /// `String` or `str` moved into.
@@ -29,7 +29,7 @@ impl<'a, Coord, T: Borrow<str>> Text<'a, Coord, T> {
 }
 
 impl<'b, 'a, Coord: 'a, T: Borrow<str> + 'a> PointCollection<'a, Coord> for &'a Text<'b, Coord, T> {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = std::iter::Once<&'a Coord>;
     fn point_iter(self) -> Self::IntoIter {
         std::iter::once(&self.coord)
@@ -216,7 +216,7 @@ impl<'a, Coord> MultiLineText<'a, Coord, String> {
 impl<'b, 'a, Coord: 'a, T: Borrow<str> + 'a> PointCollection<'a, Coord>
     for &'a MultiLineText<'b, Coord, T>
 {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = std::iter::Once<&'a Coord>;
     fn point_iter(self) -> Self::IntoIter {
         std::iter::once(&self.coord)
