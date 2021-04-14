@@ -1,5 +1,5 @@
 use super::{Drawable, PointCollection};
-use crate::drawing::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
+use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 
 use std::borrow::Borrow;
 
@@ -36,7 +36,7 @@ where
 impl<'a, 'b: 'a, DB: DrawingBackend, Coord: Clone> PointCollection<'a, Coord>
     for &'a DynElement<'b, DB, Coord>
 {
-    type Borrow = &'a Coord;
+    type Point = &'a Coord;
     type IntoIter = &'a Vec<Coord>;
     fn point_iter(self) -> Self::IntoIter {
         &self.points
