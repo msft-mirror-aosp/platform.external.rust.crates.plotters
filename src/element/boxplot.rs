@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
 use crate::data::Quartiles;
-use crate::drawing::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 use crate::element::{Drawable, PointCollection};
 use crate::style::{ShapeStyle, BLACK};
+use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 
 /// The boxplot orientation trait
 pub trait BoxplotOrient<K, V> {
@@ -177,11 +177,11 @@ impl<K, O: BoxplotOrient<K, f32>> Boxplot<K, O> {
     }
 }
 
-impl<'a, K: 'a + Clone, O: BoxplotOrient<K, f32>> PointCollection<'a, (O::XType, O::YType)>
+impl<'a, K: Clone, O: BoxplotOrient<K, f32>> PointCollection<'a, (O::XType, O::YType)>
     for &'a Boxplot<K, O>
 {
-    type Borrow = (O::XType, O::YType);
-    type IntoIter = Vec<Self::Borrow>;
+    type Point = (O::XType, O::YType);
+    type IntoIter = Vec<Self::Point>;
     fn point_iter(self) -> Self::IntoIter {
         self.values
             .iter()
@@ -257,7 +257,7 @@ mod test {
     fn test_draw_v() {
         let root = MockedBackend::new(1024, 768).into_drawing_area();
         let chart = ChartBuilder::on(&root)
-            .build_ranged(0..2, 0f32..100f32)
+            .build_cartesian_2d(0..2, 0f32..100f32)
             .unwrap();
 
         let values = Quartiles::new(&[6]);
@@ -271,7 +271,7 @@ mod test {
     fn test_draw_h() {
         let root = MockedBackend::new(1024, 768).into_drawing_area();
         let chart = ChartBuilder::on(&root)
-            .build_ranged(0f32..100f32, 0..2)
+            .build_cartesian_2d(0f32..100f32, 0..2)
             .unwrap();
 
         let values = Quartiles::new(&[6]);

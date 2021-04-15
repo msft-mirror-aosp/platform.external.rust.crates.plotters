@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
-use crate::drawing::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 use crate::element::{Drawable, PointCollection};
 use crate::style::ShapeStyle;
+use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 
 pub trait ErrorBarOrient<K, V> {
     type XType;
@@ -94,11 +94,11 @@ impl<K, V> ErrorBar<K, V, ErrorBarOrientH<K, V>> {
     }
 }
 
-impl<'a, K: 'a + Clone, V: 'a + Clone, O: ErrorBarOrient<K, V>>
-    PointCollection<'a, (O::XType, O::YType)> for &'a ErrorBar<K, V, O>
+impl<'a, K: Clone, V: Clone, O: ErrorBarOrient<K, V>> PointCollection<'a, (O::XType, O::YType)>
+    for &'a ErrorBar<K, V, O>
 {
-    type Borrow = (O::XType, O::YType);
-    type IntoIter = Vec<Self::Borrow>;
+    type Point = (O::XType, O::YType);
+    type IntoIter = Vec<Self::Point>;
     fn point_iter(self) -> Self::IntoIter {
         self.values
             .iter()

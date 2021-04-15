@@ -1,7 +1,6 @@
-use plotters::coord::IntoMonthly;
 use plotters::prelude::*;
 
-use chrono::{Datelike, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 
 use std::error::Error;
 
@@ -20,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .set_label_area_size(LabelAreaPosition::Left, 60)
         .set_label_area_size(LabelAreaPosition::Right, 60)
         .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_ranged(
+        .build_cartesian_2d(
             (Utc.ymd(2010, 1, 1)..Utc.ymd(2018, 12, 1)).monthly(),
             14.0..104.0,
         )?
@@ -34,7 +33,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .disable_x_mesh()
         .disable_y_mesh()
         .x_labels(30)
-        .x_label_formatter(&|d| format!("{}-{}", d.year(), d.month()))
         .y_desc("Average Temp (F)")
         .draw()?;
     chart
@@ -165,3 +163,7 @@ const DATA: [(i32, u32, f64); 12 * 9] = [
     (2018, 11, 39.7),
     (2018, 12, 33.6),
 ];
+#[test]
+fn entry_point() {
+    main().unwrap()
+}
