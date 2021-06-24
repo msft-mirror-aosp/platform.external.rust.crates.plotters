@@ -21,7 +21,7 @@
     ```rust
     use std::iter::{Once, once};
     use plotters::element::{PointCollection, Drawable};
-    use plotters::drawing::backend::{BackendCoord, DrawingErrorKind};
+    use plotters_backend::{BackendCoord, DrawingErrorKind, BackendStyle};
     use plotters::style::IntoTextStyle;
     use plotters::prelude::*;
 
@@ -30,7 +30,7 @@
 
     // For any reference to RedX, we can convert it into an iterator of points
     impl <'a> PointCollection<'a, (i32, i32)> for &'a RedBoxedX {
-        type Borrow = &'a (i32, i32);
+        type Point = &'a (i32, i32);
         type IntoIter = Once<&'a (i32, i32)>;
         fn point_iter(self) -> Self::IntoIter {
             once(&self.0)
@@ -46,10 +46,9 @@
             _: (u32, u32),
         ) -> Result<(), DrawingErrorKind<DB::ErrorType>> {
             let pos = pos.next().unwrap();
-            let color = RED.to_rgba();
-            backend.draw_rect(pos, (pos.0 + 10, pos.1 + 12), &color, false)?;
-            let text_style = &("sans-serif", 20).into_text_style(backend).color(&color);
-            backend.draw_text("X", &text_style, pos)
+            backend.draw_rect(pos, (pos.0 + 10, pos.1 + 12), &RED, false)?;
+            let text_style = &("sans-serif", 20).into_text_style(&backend.get_size()).color(&RED);
+            backend.draw_text("X", text_style, pos)
         }
     }
 
@@ -155,7 +154,7 @@
     ```
     ![](https://plotters-rs.github.io/plotters-doc-data/element-3.png)
 */
-use crate::drawing::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
+use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 use std::borrow::Borrow;
 
 mod basic_shapes;
@@ -185,26 +184,52 @@ mod boxplot;
 #[cfg(feature = "boxplot")]
 pub use boxplot::Boxplot;
 
-#[cfg(feature = "bitmap")]
+#[cfg(feature = "bitmap_backend")]
 mod image;
-#[cfg(feature = "bitmap")]
+#[cfg(feature = "bitmap_backend")]
 pub use self::image::BitMapElement;
 
 mod dynelem;
 pub use dynelem::{DynElement, IntoDynElement};
 
-/// A type which is logically a collection of points, under any given coordinate system
+/// A type which is logically a collection of points, under any given coordinate system.
+/// Note: Ideally, a point collection trait should be any type of which coordinate elements can be
+/// iterated. This is similar to `iter` method of many collection types in std.
+///
+/// ```ignore
+/// trait PointCollection<Coord> {
+///     type PointIter<'a> : Iterator<Item = &'a Coord>;
+///     fn iter(&self) -> PointIter<'a>;
+/// }
+/// ```
+///
+/// However,
+/// [Generic Associated Types](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md)
+/// is far away from stablize.
+/// So currently we have the following workaround:
+///
+/// Instead of implement the PointCollection trait on the element type itself, it implements on the
+/// reference to the element. By doing so, we now have a well-defined lifetime for the iterator.
+///
+/// In addition, for some element, the coordinate is computed on the fly, thus we can't hard-code
+/// the iterator's return type is `&'a Coord`.
+/// `Borrow` trait seems to strict in this case, since we don't need the order and hash
+/// preservation properties at this point. However, `AsRef` doesn't work with `Coord`
+///
+/// This workaround also leads overly strict lifetime bound on `ChartContext::draw_series`.
+///
+/// TODO: Once GAT is ready on stable Rust, we should simplify the design.
+///
 pub trait PointCollection<'a, Coord> {
     /// The item in point iterator
-    type Borrow: Borrow<Coord>;
+    type Point: Borrow<Coord> + 'a;
 
     /// The point iterator
-    type IntoIter: IntoIterator<Item = Self::Borrow>;
+    type IntoIter: IntoIterator<Item = Self::Point>;
 
     /// framework to do the coordinate mapping
     fn point_iter(self) -> Self::IntoIter;
 }
-
 /// The trait indicates we are able to draw it on a drawing area
 pub trait Drawable<DB: DrawingBackend> {
     /// Actually draws the element. The key points is already translated into the

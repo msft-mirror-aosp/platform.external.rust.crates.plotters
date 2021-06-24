@@ -1,9 +1,12 @@
-/// The abstraction of a drawing area
-use super::backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
-use crate::coord::{CoordTranslate, MeshLine, Ranged, RangedCoord, Shift};
+use crate::coord::cartesian::{Cartesian2d, MeshLine};
+use crate::coord::ranged1d::{KeyPointHint, Ranged};
+use crate::coord::{CoordTranslate, Shift};
 use crate::element::{Drawable, PointCollection};
 use crate::style::text_anchor::{HPos, Pos, VPos};
-use crate::style::{Color, FontDesc, SizeDesc, TextStyle};
+use crate::style::{Color, SizeDesc, TextStyle};
+
+/// The abstraction of a drawing area
+use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -120,7 +123,7 @@ pub struct DrawingArea<DB: DrawingBackend, CT: CoordTranslate> {
 impl<DB: DrawingBackend, CT: CoordTranslate + Clone> Clone for DrawingArea<DB, CT> {
     fn clone(&self) -> Self {
         Self {
-            backend: self.copy_backend_ref(),
+            backend: self.backend.clone(),
             rect: self.rect.clone(),
             coord: self.coord.clone(),
         }
@@ -181,13 +184,13 @@ impl<T: DrawingBackend> IntoDrawingArea for T {
     }
 }
 
-impl<DB: DrawingBackend, X: Ranged, Y: Ranged> DrawingArea<DB, RangedCoord<X, Y>> {
+impl<DB: DrawingBackend, X: Ranged, Y: Ranged> DrawingArea<DB, Cartesian2d<X, Y>> {
     /// Draw the mesh on a area
-    pub fn draw_mesh<DrawFunc>(
+    pub fn draw_mesh<DrawFunc, YH: KeyPointHint, XH: KeyPointHint>(
         &self,
         mut draw_func: DrawFunc,
-        y_count_max: usize,
-        x_count_max: usize,
+        y_count_max: YH,
+        x_count_max: XH,
     ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>>
     where
         DrawFunc: FnMut(&mut DB, MeshLine<X, Y>) -> Result<(), DrawingErrorKind<DB::ErrorType>>,
@@ -227,8 +230,16 @@ impl<DB: DrawingBackend, CT: CoordTranslate> DrawingArea<DB, CT> {
     pub fn strip_coord_spec(&self) -> DrawingArea<DB, Shift> {
         DrawingArea {
             rect: self.rect.clone(),
-            backend: self.copy_backend_ref(),
+            backend: self.backend.clone(),
             coord: Shift((self.rect.x0, self.rect.y0)),
+        }
+    }
+
+    pub fn use_screen_coord(&self) -> DrawingArea<DB, Shift> {
+        DrawingArea {
+            rect: self.rect.clone(),
+            backend: self.backend.clone(),
+            coord: Shift((0, 0)),
         }
     }
 
@@ -253,11 +264,6 @@ impl<DB: DrawingBackend, CT: CoordTranslate> DrawingArea<DB, CT> {
     /// Get the pixel range of this area
     pub fn get_pixel_range(&self) -> (Range<i32>, Range<i32>) {
         (self.rect.x0..self.rect.x1, self.rect.y0..self.rect.y1)
-    }
-
-    /// Copy the drawing context
-    fn copy_backend_ref(&self) -> Rc<RefCell<DB>> {
-        self.backend.clone()
     }
 
     /// Perform operation on the drawing backend
@@ -293,7 +299,7 @@ impl<DB: DrawingBackend, CT: CoordTranslate> DrawingArea<DB, CT> {
         color: &ColorType,
     ) -> Result<(), DrawingAreaError<DB>> {
         let pos = self.coord.translate(&pos);
-        self.backend_ops(|b| b.draw_pixel(pos, &color.to_rgba()))
+        self.backend_ops(|b| b.draw_pixel(pos, color.color()))
     }
 
     /// Present all the pending changes to the backend
@@ -330,9 +336,9 @@ impl<DB: DrawingBackend, CT: CoordTranslate> DrawingArea<DB, CT> {
     pub fn estimate_text_size(
         &self,
         text: &str,
-        font: &FontDesc,
+        style: &TextStyle,
     ) -> Result<(u32, u32), DrawingAreaError<DB>> {
-        self.backend_ops(move |b| b.estimate_text_size(text, font))
+        self.backend_ops(move |b| b.estimate_text_size(text, style))
     }
 }
 
@@ -374,7 +380,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
     pub fn apply_coord_spec<CT: CoordTranslate>(&self, coord_spec: CT) -> DrawingArea<DB, CT> {
         DrawingArea {
             rect: self.rect.clone(),
-            backend: self.copy_backend_ref(),
+            backend: self.backend.clone(),
             coord: coord_spec,
         }
     }
@@ -398,7 +404,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
                 x1: self.rect.x1 - right,
                 y1: self.rect.y1 - bottom,
             },
-            backend: self.copy_backend_ref(),
+            backend: self.backend.clone(),
             coord: Shift((self.rect.x0 + left, self.rect.y0 + top)),
         }
     }
@@ -409,7 +415,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
         let split_point = [y + self.rect.y0];
         let mut ret = self.rect.split(split_point.iter(), true).map(|rect| Self {
             rect: rect.clone(),
-            backend: self.copy_backend_ref(),
+            backend: self.backend.clone(),
             coord: Shift((rect.x0, rect.y0)),
         });
 
@@ -422,7 +428,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
         let split_point = [x + self.rect.x0];
         let mut ret = self.rect.split(split_point.iter(), false).map(|rect| Self {
             rect: rect.clone(),
-            backend: self.copy_backend_ref(),
+            backend: self.backend.clone(),
             coord: Shift((rect.x0, rect.y0)),
         });
 
@@ -435,7 +441,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
             .split_evenly((row, col))
             .map(|rect| Self {
                 rect: rect.clone(),
-                backend: self.copy_backend_ref(),
+                backend: self.backend.clone(),
                 coord: Shift((rect.x0, rect.y0)),
             })
             .collect()
@@ -459,7 +465,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
             )
             .map(|rect| Self {
                 rect: rect.clone(),
-                backend: self.copy_backend_ref(),
+                backend: self.backend.clone(),
                 coord: Shift((rect.x0, rect.y0)),
             })
             .collect()
@@ -475,7 +481,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
 
         let x_padding = (self.rect.x1 - self.rect.x0) / 2;
 
-        let (_, text_h) = self.estimate_text_size(text, &style.font)?;
+        let (_, text_h) = self.estimate_text_size(text, &style)?;
         let y_padding = (text_h / 2).min(5) as i32;
 
         let style = &style.pos(Pos::new(HPos::Center, VPos::Top));
@@ -483,7 +489,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
         self.backend_ops(|b| {
             b.draw_text(
                 text,
-                &style,
+                style,
                 (self.rect.x0 + x_padding, self.rect.y0 + y_padding),
             )
         })?;
@@ -495,7 +501,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
                 x1: self.rect.x1,
                 y1: self.rect.y1,
             },
-            backend: self.copy_backend_ref(),
+            backend: self.backend.clone(),
             coord: Shift((self.rect.x0, self.rect.y0 + y_padding * 2 + text_h as i32)),
         })
     }
@@ -507,9 +513,7 @@ impl<DB: DrawingBackend> DrawingArea<DB, Shift> {
         style: &TextStyle,
         pos: BackendCoord,
     ) -> Result<(), DrawingAreaError<DB>> {
-        self.backend_ops(|b| {
-            b.draw_text(text, &style, (pos.0 + self.rect.x0, pos.1 + self.rect.y0))
-        })
+        self.backend_ops(|b| b.draw_text(text, style, (pos.0 + self.rect.x0, pos.1 + self.rect.y0)))
     }
 }
 
@@ -520,6 +524,10 @@ impl<DB: DrawingBackend, CT: CoordTranslate> DrawingArea<DB, CT> {
 
     pub fn as_coord_spec(&self) -> &CT {
         &self.coord
+    }
+
+    pub fn as_coord_spec_mut(&mut self) -> &mut CT {
+        &mut self.coord
     }
 }
 
@@ -748,15 +756,11 @@ mod drawing_area_tests {
 
     #[test]
     fn test_ranges() {
-        let drawing_area =
-            create_mocked_drawing_area(1024, 768, |_m| {}).apply_coord_spec(RangedCoord::<
-                RangedCoordi32,
-                RangedCoordu32,
-            >::new(
-                -100..100,
-                0..200,
-                (0..1024, 0..768),
-            ));
+        let drawing_area = create_mocked_drawing_area(1024, 768, |_m| {})
+            .apply_coord_spec(Cartesian2d::<
+            crate::coord::types::RangedCoordi32,
+            crate::coord::types::RangedCoordu32,
+        >::new(-100..100, 0..200, (0..1024, 0..768)));
 
         let x_range = drawing_area.get_x_range();
         assert_eq!(x_range, -100..100);
