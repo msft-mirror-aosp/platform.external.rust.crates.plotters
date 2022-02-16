@@ -15,51 +15,50 @@ pub struct TextStyle<'a> {
     /// The anchor point position
     pub pos: text_anchor::Pos,
 }
+
 pub trait IntoTextStyle<'a> {
     fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a>;
+}
 
-    fn with_color<C: Color>(self, color: C) -> TextStyleBuilder<'a, Self>
-    where
-        Self: Sized,
-    {
-        TextStyleBuilder {
-            base: self,
-            new_color: Some(color.to_backend_color()),
-            new_pos: None,
-            _phatom: std::marker::PhantomData,
-        }
-    }
-
-    fn with_anchor<C: Color>(self, pos: text_anchor::Pos) -> TextStyleBuilder<'a, Self>
-    where
-        Self: Sized,
-    {
-        TextStyleBuilder {
-            base: self,
-            new_pos: Some(pos),
-            new_color: None,
-            _phatom: std::marker::PhantomData,
-        }
+impl<'a> IntoTextStyle<'a> for FontDesc<'a> {
+    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'a> {
+        self.into()
     }
 }
 
-pub struct TextStyleBuilder<'a, T: IntoTextStyle<'a>> {
-    base: T,
-    new_color: Option<BackendColor>,
-    new_pos: Option<text_anchor::Pos>,
-    _phatom: std::marker::PhantomData<&'a T>,
+impl<'a> IntoTextStyle<'a> for TextStyle<'a> {
+    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'a> {
+        self
+    }
 }
 
-impl<'a, T: IntoTextStyle<'a>> IntoTextStyle<'a> for TextStyleBuilder<'a, T> {
+impl<'a> IntoTextStyle<'a> for FontFamily<'a> {
+    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'a> {
+        self.into()
+    }
+}
+
+impl<'a, T: SizeDesc> IntoTextStyle<'a> for (&'a str, T) {
     fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a> {
-        let mut base = self.base.into_text_style(parent);
-        if let Some(color) = self.new_color {
-            base.color = color;
-        }
-        if let Some(pos) = self.new_pos {
-            base = base.pos(pos);
-        }
-        base
+        (self.0, self.1.in_pixels(parent)).into()
+    }
+}
+
+impl<'a, T: SizeDesc> IntoTextStyle<'a> for (FontFamily<'a>, T) {
+    fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a> {
+        (self.0, self.1.in_pixels(parent)).into()
+    }
+}
+
+impl<'a, T: SizeDesc> IntoTextStyle<'a> for (&'a str, T, FontStyle) {
+    fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a> {
+        Into::<FontDesc>::into((self.0, self.1.in_pixels(parent), self.2)).into()
+    }
+}
+
+impl<'a, T: SizeDesc> IntoTextStyle<'a> for (FontFamily<'a>, T, FontStyle) {
+    fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a> {
+        Into::<FontDesc>::into((self.0, self.1.in_pixels(parent), self.2)).into()
     }
 }
 
@@ -77,7 +76,7 @@ impl<'a> TextStyle<'a> {
     pub fn color<C: Color>(&self, color: &'a C) -> Self {
         Self {
             font: self.font.clone(),
-            color: color.to_backend_color(),
+            color: color.color(),
             pos: self.pos,
         }
     }
@@ -121,74 +120,6 @@ impl<'a> TextStyle<'a> {
     }
 }
 
-impl<'a> IntoTextStyle<'a> for FontDesc<'a> {
-    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'a> {
-        self.into()
-    }
-}
-
-impl<'a> IntoTextStyle<'a> for TextStyle<'a> {
-    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'a> {
-        self
-    }
-}
-
-impl<'a> IntoTextStyle<'a> for &'a str {
-    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'a> {
-        self.into()
-    }
-}
-
-impl<'a> IntoTextStyle<'a> for FontFamily<'a> {
-    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'a> {
-        self.into()
-    }
-}
-
-impl IntoTextStyle<'static> for u32 {
-    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'static> {
-        TextStyle::from((FontFamily::SansSerif, self))
-    }
-}
-
-impl IntoTextStyle<'static> for f64 {
-    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'static> {
-        TextStyle::from((FontFamily::SansSerif, self))
-    }
-}
-
-impl<'a, T: Color> IntoTextStyle<'a> for &'a T {
-    fn into_text_style<P: HasDimension>(self, _: &P) -> TextStyle<'a> {
-        TextStyle::from(FontFamily::SansSerif).color(self)
-    }
-}
-
-impl<'a, F: Into<FontFamily<'a>>, T: SizeDesc> IntoTextStyle<'a> for (F, T) {
-    fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a> {
-        (self.0.into(), self.1.in_pixels(parent)).into()
-    }
-}
-
-impl<'a, F: Into<FontFamily<'a>>, T: SizeDesc, C: Color> IntoTextStyle<'a> for (F, T, &'a C) {
-    fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a> {
-        IntoTextStyle::into_text_style((self.0, self.1), parent).color(self.2)
-    }
-}
-
-impl<'a, F: Into<FontFamily<'a>>, T: SizeDesc> IntoTextStyle<'a> for (F, T, FontStyle) {
-    fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a> {
-        (self.0.into(), self.1.in_pixels(parent), self.2).into()
-    }
-}
-
-impl<'a, F: Into<FontFamily<'a>>, T: SizeDesc, C: Color> IntoTextStyle<'a>
-    for (F, T, FontStyle, &'a C)
-{
-    fn into_text_style<P: HasDimension>(self, parent: &P) -> TextStyle<'a> {
-        IntoTextStyle::into_text_style((self.0, self.1, self.2), parent).color(self.3)
-    }
-}
-
 /// Make sure that we are able to automatically copy the `TextStyle`
 impl<'a, 'b: 'a> Into<TextStyle<'a>> for &'b TextStyle<'a> {
     fn into(self) -> TextStyle<'a> {
@@ -200,7 +131,7 @@ impl<'a, T: Into<FontDesc<'a>>> From<T> for TextStyle<'a> {
     fn from(font: T) -> Self {
         Self {
             font: font.into(),
-            color: BLACK.to_backend_color(),
+            color: BLACK.color(),
             pos: text_anchor::Pos::default(),
         }
     }
@@ -209,7 +140,7 @@ impl<'a, T: Into<FontDesc<'a>>> From<T> for TextStyle<'a> {
 impl<'a> BackendTextStyle for TextStyle<'a> {
     type FontError = FontError;
     fn color(&self) -> BackendColor {
-        self.color
+        self.color.color()
     }
 
     fn size(&self) -> f64 {
