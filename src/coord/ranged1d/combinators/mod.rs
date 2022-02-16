@@ -8,10 +8,7 @@ mod linspace;
 pub use linspace::{IntoLinspace, Linspace};
 
 mod logarithmic;
-pub use logarithmic::{IntoLogRange, LogCoord, LogScalable};
-
-#[allow(deprecated)]
-pub use logarithmic::LogRange;
+pub use logarithmic::{IntoLogRange, LogCoord, LogRange, LogScalable};
 
 mod nested;
 pub use nested::{BuildNestedCoord, NestedRange, NestedValue};
