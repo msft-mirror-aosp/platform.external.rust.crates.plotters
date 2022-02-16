@@ -45,18 +45,6 @@ impl SizeDesc for u32 {
     }
 }
 
-impl SizeDesc for f32 {
-    fn in_pixels<D: HasDimension>(&self, _parent: &D) -> i32 {
-        *self as i32
-    }
-}
-
-impl SizeDesc for f64 {
-    fn in_pixels<D: HasDimension>(&self, _parent: &D) -> i32 {
-        *self as i32
-    }
-}
-
 /// Describes a relative size, might be
 ///     1. portion of height
 ///     2. portion of width
