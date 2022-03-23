@@ -10,9 +10,7 @@ use crate::coord::ranged3d::{ProjectionMatrix, ProjectionMatrixBuilder};
 use crate::coord::{CoordTranslate, ReverseCoordTranslate, Shift};
 
 use crate::drawing::{DrawingArea, DrawingAreaErrorKind};
-use crate::element::{
-    CoordMapper, Drawable, EmptyElement, PathElement, PointCollection, Polygon, Text,
-};
+use crate::element::{Drawable, EmptyElement, PathElement, PointCollection, Polygon, Text};
 use crate::style::text_anchor::{HPos, Pos, VPos};
 use crate::style::{ShapeStyle, TextStyle};
 
@@ -99,14 +97,13 @@ impl<'a, DB: DrawingBackend, CT: CoordTranslate> ChartContext<'a, DB, CT> {
     //       of points reference with the same lifetime.
     //       However, this doesn't work if the coordinate doesn't live longer than the backend,
     //       this is unnecessarily strict
-    pub(super) fn draw_series_impl<B, E, R, S>(
+    pub(super) fn draw_series_impl<E, R, S>(
         &mut self,
         series: S,
     ) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>>
     where
-        B: CoordMapper,
-        for<'b> &'b E: PointCollection<'b, CT::From, B>,
-        E: Drawable<DB, B>,
+        for<'b> &'b E: PointCollection<'b, CT::From>,
+        E: Drawable<DB>,
         R: Borrow<E>,
         S: IntoIterator<Item = R>,
     {
@@ -123,14 +120,13 @@ impl<'a, DB: DrawingBackend, CT: CoordTranslate> ChartContext<'a, DB, CT> {
     }
 
     /// Draw a data series. A data series in Plotters is abstracted as an iterator of elements
-    pub fn draw_series<B, E, R, S>(
+    pub fn draw_series<E, R, S>(
         &mut self,
         series: S,
     ) -> Result<&mut SeriesAnno<'a, DB>, DrawingAreaErrorKind<DB::ErrorType>>
     where
-        B: CoordMapper,
-        for<'b> &'b E: PointCollection<'b, CT::From, B>,
-        E: Drawable<DB, B>,
+        for<'b> &'b E: PointCollection<'b, CT::From>,
+        E: Drawable<DB>,
         R: Borrow<E>,
         S: IntoIterator<Item = R>,
     {
@@ -306,10 +302,11 @@ impl<'a, DB: DrawingBackend, X: Ranged, Y: Ranged> ChartContext<'a, DB, Cartesia
             .iter()
             .map(|(_, text)| {
                 if orientation.0 > 0 && orientation.1 == 0 && tick_size >= 0 {
-                    self.drawing_area
-                        .estimate_text_size(text, &label_style)
-                        .map(|(w, _)| w)
-                        .unwrap_or(0) as i32
+                    let ((x0, _), (x1, _)) = label_style
+                        .font
+                        .layout_box(text)
+                        .unwrap_or(((0, 0), (0, 0)));
+                    x1 - x0
                 } else {
                     // Don't ever do the layout estimationfor the drawing area that is either not
                     // the right one or the tick mark is inward.
@@ -605,14 +602,6 @@ where
         self.drawing_area
             .as_coord_spec_mut()
             .set_projection(actual_x, actual_y, pf);
-        self
-    }
-
-    pub fn set_3d_pixel_range(&mut self, size: (i32, i32, i32)) -> &mut Self {
-        let (actual_x, actual_y) = self.drawing_area.get_pixel_range();
-        self.drawing_area
-            .as_coord_spec_mut()
-            .set_coord_pixel_range(actual_x, actual_y, size);
         self
     }
 }
