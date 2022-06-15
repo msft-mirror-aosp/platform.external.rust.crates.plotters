@@ -6,20 +6,17 @@ use plotters_backend::{BackendColor, BackendStyle};
 use std::marker::PhantomData;
 
 /// Any color representation
-pub trait Color {
-    /// Normalize this color representation to the backend color
-    fn to_backend_color(&self) -> BackendColor;
-
+pub trait Color: BackendStyle {
     /// Convert the RGB representation to the standard RGB tuple
     #[inline(always)]
     fn rgb(&self) -> (u8, u8, u8) {
-        self.to_backend_color().rgb
+        self.color().rgb
     }
 
     /// Get the alpha channel of the color
     #[inline(always)]
     fn alpha(&self) -> f64 {
-        self.to_backend_color().alpha
+        self.color().alpha
     }
 
     /// Mix the color with given opacity
@@ -53,26 +50,21 @@ pub trait Color {
     }
 }
 
-impl<T: Color> Color for &'_ T {
-    fn to_backend_color(&self) -> BackendColor {
-        <T as Color>::to_backend_color(*self)
-    }
-}
-
 /// The RGBA representation of the color, Plotters use RGBA as the internal representation
 /// of color
-#[derive(Copy, Clone, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct RGBAColor(pub(crate) u8, pub(crate) u8, pub(crate) u8, pub(crate) f64);
 
-impl Color for RGBAColor {
+impl BackendStyle for RGBAColor {
     #[inline(always)]
-    fn to_backend_color(&self) -> BackendColor {
+    fn color(&self) -> BackendColor {
         BackendColor {
             rgb: (self.0, self.1, self.2),
             alpha: self.3,
         }
     }
 }
+impl Color for RGBAColor {}
 
 /// A color in the given palette
 pub struct PaletteColor<P: Palette>(usize, PhantomData<P>);
@@ -84,9 +76,9 @@ impl<P: Palette> PaletteColor<P> {
     }
 }
 
-impl<P: Palette> Color for PaletteColor<P> {
+impl<P: Palette> BackendStyle for PaletteColor<P> {
     #[inline(always)]
-    fn to_backend_color(&self) -> BackendColor {
+    fn color(&self) -> BackendColor {
         BackendColor {
             rgb: P::COLORS[self.0],
             alpha: 1.0,
@@ -94,38 +86,31 @@ impl<P: Palette> Color for PaletteColor<P> {
     }
 }
 
+impl<P: Palette> Color for PaletteColor<P> {}
+
 /// The color described by its RGB value
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
+#[derive(Debug)]
 pub struct RGBColor(pub u8, pub u8, pub u8);
 
-impl BackendStyle for RGBAColor {
-    fn color(&self) -> BackendColor {
-        self.to_backend_color()
-    }
-}
-
-impl Color for RGBColor {
+impl BackendStyle for RGBColor {
     #[inline(always)]
-    fn to_backend_color(&self) -> BackendColor {
+    fn color(&self) -> BackendColor {
         BackendColor {
             rgb: (self.0, self.1, self.2),
             alpha: 1.0,
         }
     }
 }
-impl BackendStyle for RGBColor {
-    fn color(&self) -> BackendColor {
-        self.to_backend_color()
-    }
-}
+
+impl Color for RGBColor {}
 
 /// The color described by HSL color space
 pub struct HSLColor(pub f64, pub f64, pub f64);
 
-impl Color for HSLColor {
+impl BackendStyle for HSLColor {
     #[inline(always)]
     #[allow(clippy::many_single_char_names)]
-    fn to_backend_color(&self) -> BackendColor {
+    fn color(&self) -> BackendColor {
         let (h, s, l) = (
             self.0.min(1.0).max(0.0),
             self.1.min(1.0).max(0.0),
@@ -172,3 +157,5 @@ impl Color for HSLColor {
         }
     }
 }
+
+impl Color for HSLColor {}
